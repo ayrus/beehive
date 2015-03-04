@@ -64,11 +64,6 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	case put:
 		return ctx.Dict(dict).Put(data.Key, data.Val)
 	case get:
-		// v, err := ctx.Dict(dict).Get("10.0.0.0")
-		// if err != nil {
-		// 	return errKeyNotFound
-		// }
-
 		var rt Route
 		var terr error
 
@@ -76,7 +71,7 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 		var bestRt Route
 
 		// dummy
-		bestRt.Mask = net.ParseIP(string("0.0.0.0"))
+		bestRt.Mask = net.ParseIP("0.0.0.0")
 		bestMask := net.IPMask(bestRt.Mask.To4())
 
 		ctx.Dict(dict).ForEach(func(ik string, iv []byte){
@@ -92,9 +87,8 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 			
 			msk := net.IPMask(rt.Mask.To4())
 			reqIPmsk := reqIP.Mask(msk)
-			rtIPmsk := rt.Dest.Mask(msk) 
 
-			if reqIPmsk.Equal(rtIPmsk){
+			if reqIPmsk.Equal(rt.Dest){
 				s1, _ := msk.Size()
 				s2, _ := bestMask.Size();
 				if (s1 > s2) {
