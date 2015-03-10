@@ -64,10 +64,13 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	case put:
 		return ctx.Dict(dict).Put(data.Key, data.Val)
 	case get:
+
 		var rt Route
 		var terr error
 
+
 		reqIP := net.ParseIP(string(data))
+
 		var bestRt Route
 
 		// dummy
@@ -111,14 +114,56 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 
 func (s *lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 	var k string
+	var rt Route
+	var terr error
+
 	switch data := msg.Data().(type) {
 	case put:
-		k = string(data.Key)
+		//k = string(data.Key)
+		//fmt.Println(data.Key)
+		//fmt.Println(data.Val)
+
+		terr = json.Unmarshal(data.Val, &rt)
+		if terr != nil {
+			fmt.Println("Unmarshal error: ", terr)
+		}
+
+		//fmt.Printf("%s | %s - %s - %s - %s\n", 
+		//	data.Key, rt.Dest, rt.Mask, rt.Gateway, rt.Iface)
+
+		msk := net.IPMask(rt.Mask.To4())
+		k = rt.Dest.Mask(msk).String()
+
+		//rt.Dest.String().split(".")
+		// arr := rt.Dest.To4()
+		// fmt.Printf("%d %d %d %d\n", arr[0], arr[1], arr[2], arr[3]);
+		// x := (uint64(arr[0]) << 24) + (uint64(arr[1]) << 16) + (uint64(arr[2]) << 8) + uint64(arr[3]);
+
+		// fmt.Printf("%s\n", strconv.FormatUint(x, 2)) 
+		// fmt.Printf("%s | %s - %s - %s - %s\n", 
+		// 	k, rt.Dest, rt.Mask, rt.Gateway, rt.Iface)
+
+
+
+
 	case get:
 		k = string(data)
+		//for i := net.IPv4len * 8; i >= 0; i-- {
+			//mask := net.CIDRMask(i, net.IPv4len * 8);
+			//ip := net.ParseIP(string(data))
+
+			//k = ip.Mask(mask).String()
+			//k = "nothing"
+		//}
+
+
 	case del:
 		k = string(data)
 	}
+
+
+
+
 	cells := bh.MappedCells{
 		{
 			Dict: dict,
@@ -126,6 +171,20 @@ func (s *lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 		},
 	}
 	return cells
+	// 1.2.3.4/8 -> 1
+	// 1,2,3,4/16 -> 1.2
+
+	// 1.2.3.4 & mask
+	// (1.2.3.4 >> 31) << 31
+
+	// 1,0,0,0/4 -> 1.0.0.0
+	// 1.0.0.0/32 -> 1.0.0.0
+
+	// 2.0.0.0/4
+	// 2.0.0.0/32
+	//
+
+	// Query: 1.0.0.0
 }
 
 func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +200,16 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
-		res, err = s.Process(ctx, get(k))
+
+		for i := net.IPv4len * 8; i >= 0; i-- {
+			mask := net.CIDRMask(i, net.IPv4len * 8);
+			ip := net.ParseIP(string(k))
+
+			k = ip.Mask(mask).String()
+			res, err = s.Process(ctx, get(k+":"+strconv.(i)))			
+		}
+
+
 		fmt.Println("Served LPM")
 	case "PUT":
 		var v []byte
@@ -182,7 +250,7 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 var (
 	replFactor = flag.Int("kv.rf", 3, "replication factor")
-	buckets    = flag.Int("kv.b", 1, "number of buckets")
+	buckets    = flag.Int("kv.b", 50, "number of buckets")
 	cpuprofile = flag.String("kv.cpuprofile", "", "write cpu profile to file")
 	quiet      = flag.Bool("kv.quiet", true, "no raft log")
 	random     = flag.Bool("kv.rand", false, "whether to use random placement")
