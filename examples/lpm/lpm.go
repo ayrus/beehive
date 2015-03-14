@@ -5,18 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"math/rand"
-	"net/http"
 	"net"
+	"net/http"
 	"os"
 	"runtime/pprof"
 	"strconv"
 	"time"
-	"fmt"
 
-	"github.com/OneOfOne/xxhash"
+	//	"github.com/OneOfOne/xxhash"
 	bh "github.com/kandoo/beehive"
 	"github.com/kandoo/beehive/Godeps/_workspace/src/github.com/golang/glog"
 	"github.com/kandoo/beehive/Godeps/_workspace/src/github.com/gorilla/mux"
@@ -41,7 +41,7 @@ type put struct {
 type get string
 type result struct {
 	Key string `json:"request"`
-	Val Route `json:"route"`
+	Val Route  `json:"route"`
 }
 
 type del string
@@ -52,60 +52,48 @@ type lpm struct {
 }
 
 type Route struct {
-	Dest net.IP `json:"dest"`
-	Mask net.IP `json:"mask"`
-	Gateway net.IP `json:"gateway"`
-	Iface string `json:"iface"`
-	//Priority string `json:"priority"`
+	Dest     net.IP `json:"dest"`
+	Len      int    `json:"len"`
+	Name     string `json:"name"`
+	Priority int    `json:"priority"`
+}
+
+func Unmarshal(data []byte) Route {
+	var rt Route
+	var terr error
+
+	terr = json.Unmarshal(data, &rt)
+	if terr != nil {
+		fmt.Println("Unmarshal error: ", terr)
+	}
+
+	return rt
+}
+
+func GetKey(data []byte) string {
+	rt := Unmarshal(data)
+	msk := net.CIDRMask(rt.Len, 32)
+	k := rt.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(rt.Len), 10)
+	return k
 }
 
 func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	switch data := msg.Data().(type) {
 	case put:
-		return ctx.Dict(dict).Put(data.Key, data.Val)
+		fmt.Printf("Inserted %s\n", GetKey(data.Val))
+		return ctx.Dict(dict).Put(GetKey(data.Val), data.Val)
 	case get:
+		res, err := ctx.Dict(dict).Get(string(data))
+		fmt.Printf("Looking up %s\n", data)
+		if err == nil && len(res) > 0 {
+			fmt.Println("Found")
+			ctx.ReplyTo(msg, result{Key: string(data), Val: Unmarshal(res)})
+		} else {
+			ctx.ReplyTo(msg, nil)
+		}
 
-		var rt Route
-		var terr error
-
-
-		reqIP := net.ParseIP(string(data))
-
-		var bestRt Route
-
-		// dummy
-		bestRt.Mask = net.ParseIP("0.0.0.0")
-		bestMask := net.IPMask(bestRt.Mask.To4())
-
-		ctx.Dict(dict).ForEach(func(ik string, iv []byte){
-			
-			terr = json.Unmarshal(iv, &rt)
-			if terr != nil {
-				fmt.Println("Unmarshal error: ", terr)
-			}
-
-			// fmt.Printf("%s | %s - %s - %s - %s\n", 
-			// 	ik, rt.Dest, rt.Mask, rt.Gateway, rt.Iface)
-
-			
-			msk := net.IPMask(rt.Mask.To4())
-			reqIPmsk := reqIP.Mask(msk)
-
-			if reqIPmsk.Equal(rt.Dest){
-				s1, _ := msk.Size()
-				s2, _ := bestMask.Size();
-				if (s1 > s2) {
-					bestMask = msk
-					bestRt = rt 
-				}
-			}
-			
-			})
-		// fmt.Printf("LPM | %s - %s - %s - %s\n", 
-		// 		bestRt.Dest, bestRt.Mask, bestRt.Gateway, bestRt.Iface)
-
-		ctx.ReplyTo(msg, result{Key: string(data), Val: bestRt})
 		return nil
+
 	case del:
 		return ctx.Dict(dict).Del(string(data))
 	}
@@ -114,77 +102,23 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 
 func (s *lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 	var k string
-	var rt Route
-	var terr error
 
 	switch data := msg.Data().(type) {
 	case put:
-		//k = string(data.Key)
-		//fmt.Println(data.Key)
-		//fmt.Println(data.Val)
-
-		terr = json.Unmarshal(data.Val, &rt)
-		if terr != nil {
-			fmt.Println("Unmarshal error: ", terr)
-		}
-
-		//fmt.Printf("%s | %s - %s - %s - %s\n", 
-		//	data.Key, rt.Dest, rt.Mask, rt.Gateway, rt.Iface)
-
-		msk := net.IPMask(rt.Mask.To4())
-		k = rt.Dest.Mask(msk).String()
-
-		//rt.Dest.String().split(".")
-		// arr := rt.Dest.To4()
-		// fmt.Printf("%d %d %d %d\n", arr[0], arr[1], arr[2], arr[3]);
-		// x := (uint64(arr[0]) << 24) + (uint64(arr[1]) << 16) + (uint64(arr[2]) << 8) + uint64(arr[3]);
-
-		// fmt.Printf("%s\n", strconv.FormatUint(x, 2)) 
-		// fmt.Printf("%s | %s - %s - %s - %s\n", 
-		// 	k, rt.Dest, rt.Mask, rt.Gateway, rt.Iface)
-
-
-
-
+		k = GetKey(data.Val)
 	case get:
 		k = string(data)
-		//for i := net.IPv4len * 8; i >= 0; i-- {
-			//mask := net.CIDRMask(i, net.IPv4len * 8);
-			//ip := net.ParseIP(string(data))
-
-			//k = ip.Mask(mask).String()
-			//k = "nothing"
-		//}
-
-
 	case del:
 		k = string(data)
 	}
 
-
-
-
 	cells := bh.MappedCells{
 		{
 			Dict: dict,
-			Key:  strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16),
+			Key:  k,
 		},
 	}
 	return cells
-	// 1.2.3.4/8 -> 1
-	// 1,2,3,4/16 -> 1.2
-
-	// 1.2.3.4 & mask
-	// (1.2.3.4 >> 31) << 31
-
-	// 1,0,0,0/4 -> 1.0.0.0
-	// 1.0.0.0/32 -> 1.0.0.0
-
-	// 2.0.0.0/4
-	// 2.0.0.0/32
-	//
-
-	// Query: 1.0.0.0
 }
 
 func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -201,14 +135,41 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 
+		chnl := make(chan interface{})
 		for i := net.IPv4len * 8; i >= 0; i-- {
-			mask := net.CIDRMask(i, net.IPv4len * 8);
+			mask := net.CIDRMask(i, net.IPv4len*8)
 			ip := net.ParseIP(string(k))
 
 			k = ip.Mask(mask).String()
-			res, err = s.Process(ctx, get(k+":"+strconv.(i)))			
+			req := k + "/" + strconv.FormatInt(int64(i), 10)
+
+			go func(req string) {
+				res, err = s.Process(ctx, get(req))
+
+				if err == nil {
+					chnl <- res
+				} else {
+					chnl <- nil
+				}
+			}(req)
 		}
 
+		best_pri := -1
+		best_len := -1
+
+		for i := 0; i < 32; i++ {
+			x := <-chnl
+			if x != nil {
+				ret := x.(result)
+				rt := ret.Val
+				if rt.Priority > best_pri || (rt.Priority == best_pri && rt.Len > best_len) {
+					res = rt
+					best_pri = rt.Priority
+					best_len = rt.Len
+				}
+				fmt.Println(x)
+			}
+		}
 
 		fmt.Println("Served LPM")
 	case "PUT":
