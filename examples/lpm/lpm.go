@@ -51,6 +51,10 @@ type lpm struct {
 	buckets uint64
 }
 
+type warmup struct {
+	bnum int
+}
+
 type Route struct {
 	Dest     net.IP `json:"dest"`
 	Len      int    `json:"len"`
@@ -96,6 +100,9 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 
 	case del:
 		return ctx.Dict(dict).Del(string(data))
+	case warmup:
+		fmt.Printf("Created bee\n")
+		return nil
 	}
 	return errInvalid
 }
@@ -106,16 +113,21 @@ func (s *lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 	switch data := msg.Data().(type) {
 	case put:
 		k = GetKey(data.Val)
+		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
 	case get:
 		k = string(data)
+		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
 	case del:
 		k = string(data)
+		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
+	case warmup:
+		k = strconv.FormatUint(uint64(data.bnum), 16)
 	}
 
 	cells := bh.MappedCells{
 		{
 			Dict: dict,
-			Key:  strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16),
+			Key:  k,
 		},
 	}
 	return cells
@@ -134,7 +146,6 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
-
 		chnl := make(chan interface{})
 		for i := net.IPv4len * 8; i >= 0; i-- {
 			mask := net.CIDRMask(i, net.IPv4len*8)
@@ -210,11 +221,12 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 var (
-	replFactor = flag.Int("kv.rf", 3, "replication factor")
-	buckets    = flag.Int("kv.b", 50, "number of buckets")
-	cpuprofile = flag.String("kv.cpuprofile", "", "write cpu profile to file")
-	quiet      = flag.Bool("kv.quiet", true, "no raft log")
-	random     = flag.Bool("kv.rand", false, "whether to use random placement")
+	replFactor    = flag.Int("kv.rf", 3, "replication factor")
+	buckets       = flag.Int("kv.b", 50, "number of buckets")
+	cpuprofile    = flag.String("kv.cpuprofile", "", "write cpu profile to file")
+	quiet         = flag.Bool("kv.quiet", true, "no raft log")
+	random        = flag.Bool("kv.rand", false, "whether to use random placement")
+	should_warmup = flag.Bool("lpm.warmup", false, "whether to warm up beehive before processing requests")
 )
 
 func main() {
@@ -258,12 +270,28 @@ func main() {
 		Sync:    s,
 		buckets: uint64(*buckets),
 	}
+
+	s.Handle(warmup{}, kv)
 	s.Handle(put{}, kv)
 	s.Handle(get(""), kv)
 	s.Handle(del(""), kv)
 	a.HandleHTTP("/{key}", kv)
 
+	fmt.Println("Hi")
+	go func() {
+		ctx, cnl := context.WithTimeout(context.Background(), 30*time.Second)
+		if *should_warmup && *buckets > 0 {
+			fmt.Println("Entered")
+			for i := 0; i < *buckets; i++ {
+				s.Process(ctx, warmup{i})
+			}
+		}
+
+		cnl()
+	}()
+
 	bh.Start()
+
 }
 
 func init() {
