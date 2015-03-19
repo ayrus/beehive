@@ -21,8 +21,8 @@ if __name__ == '__main__':
             totalGet += d['dur']
             num_get += 1
             getPoints.append(d['dur'])
-    averagePut = float(totalPut / num_put) / 10e9
-    averageGet = float(totalGet / num_get) / 10e9
+    averagePut = float(totalPut / num_put) / 1e9
+    averageGet = float(totalGet / num_get) / 1e9
 
     #plt.figure(0)
     plt.scatter(xrange(num_put), putPoints, color='red')
