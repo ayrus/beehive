@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"time"
 
-	//	"github.com/OneOfOne/xxhash"
+	"github.com/OneOfOne/xxhash"
 	bh "github.com/kandoo/beehive"
 	"github.com/kandoo/beehive/Godeps/_workspace/src/github.com/golang/glog"
 	"github.com/kandoo/beehive/Godeps/_workspace/src/github.com/gorilla/mux"
@@ -115,7 +115,7 @@ func (s *lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 	cells := bh.MappedCells{
 		{
 			Dict: dict,
-			Key:  k,
+			Key:  strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16),
 		},
 	}
 	return cells
