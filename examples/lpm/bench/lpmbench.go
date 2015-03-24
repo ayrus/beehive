@@ -37,7 +37,8 @@ type Route struct {
 	Priority int    `json:"priority"`
 }
 
-func generateRandomRoute() (string, Route) {
+// func generateRandomRoute() (string, Route) {
+func generateRandomRoute() (string) {
     //rand.Seed(time.Now().Unix())
     block1 := rand.Intn(254) + 1; // just so the IP starts with atleast 1
 	block2 := rand.Intn(255);
@@ -47,13 +48,14 @@ func generateRandomRoute() (string, Route) {
            strconv.Itoa(block2) + "." +
            strconv.Itoa(block3) + "." +
            strconv.Itoa(block4);
-	dest := net.ParseIP(key);
-	prefixLen := rand.Intn(32);
-	name := randString(32);
-	p := rand.Intn(10);
-	route := Route{dest, prefixLen, name, p}
+	// dest := net.ParseIP(key);
+	// prefixLen := rand.Intn(32);
+	// name := randString(32);
+	// p := rand.Intn(10);
+	// route := Route{dest, prefixLen, name, p}
 
-    return key, route
+    // return key, route
+    return key
 }
 
 func newTarget(method, url string, body []byte) target {
@@ -127,18 +129,30 @@ func generateTargets(addr string, writes, localReads,
 	var targets []target
 	var keys []string
 	for i := 0; i < writes; i++ {
-		k, v := generateRandomRoute()
-		data, err := json.Marshal(v);
-		if (err == nil){
-			keys = append(keys, k)
-	        // put requests here, modify
-			t := newTarget("PUT", "http://"+addr+"/apps/lpm/"+k,
+		// k, v := generateRandomRoute()
+        k := generateRandomRoute()
+		
+        for j := 0; j<5; j++ {
+            // put requests here, modify
+            // dest := net.ParseIP(key);
+            dest := net.ParseIP(k);
+            prefixLen := rand.Intn(32);
+            name := randString(32);
+            p := rand.Intn(10);
+            route := Route{dest, prefixLen, name, p}
+            data, err := json.Marshal(route);
+            //data, err := json.Marshal(v);
+            if (err == nil){
+                keys = append(keys, k)
+                t := newTarget("PUT", "http://"+addr+"/apps/lpm/"+k,
 				[]byte(data))
-			targets = append(targets, t)
-		} else {
-			fmt.Println("ERROR");
-		}
-	}
+                fmt.Println(route)
+                targets = append(targets, t)
+            } else {
+                fmt.Println("ERROR");
+            }
+        }
+    }
 	for i := 0; i < localReads; i++ {
 
         // modify with getting IP
