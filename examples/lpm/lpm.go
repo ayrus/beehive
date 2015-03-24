@@ -99,7 +99,10 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 		return nil
 
 	case del:
-		return ctx.Dict(dict).Del(string(data))
+        fmt.Printf("Delete %s\n", data);
+        return ctx.Dict(dict).Del(string(data))
+        // deleteKey := string(data) 
+        // return ctx.Dict(dict).Del(deleteKey)
 	case warmup:
 		fmt.Printf("Created bee\n")
 		return nil
@@ -189,7 +192,10 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("PUT")
 		res, err = s.Process(ctx, put{Key: k, Val: v})
 	case "DELETE":
-		res, err = s.Process(ctx, del(k))
+		var v []byte
+		v, err = ioutil.ReadAll(r.Body)
+
+        res, err = s.Process(ctx, del(GetKey(v)))
 	}
 	cnl()
 
