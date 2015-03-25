@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"flag"
@@ -9,11 +10,11 @@ import (
 	"io"
 	"io/ioutil"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
-    "strconv"
-	"net"
 )
 
 const (
@@ -38,24 +39,24 @@ type Route struct {
 }
 
 // func generateRandomRoute() (string, Route) {
-func generateRandomRoute() (string) {
-    //rand.Seed(time.Now().Unix())
-    block1 := rand.Intn(254) + 1; // just so the IP starts with atleast 1
-	block2 := rand.Intn(255);
-	block3 := rand.Intn(255);
-	block4 := rand.Intn(255);
+func generateRandomRoute() string {
+	//rand.Seed(time.Now().Unix())
+	block1 := rand.Intn(254) + 1 // just so the IP starts with atleast 1
+	block2 := rand.Intn(255)
+	block3 := rand.Intn(255)
+	block4 := rand.Intn(255)
 	key := strconv.Itoa(block1) + "." +
-           strconv.Itoa(block2) + "." +
-           strconv.Itoa(block3) + "." +
-           strconv.Itoa(block4);
-	// dest := net.ParseIP(key);
-	// prefixLen := rand.Intn(32);
-	// name := randString(32);
-	// p := rand.Intn(10);
-	// route := Route{dest, prefixLen, name, p}
+		strconv.Itoa(block2) + "." +
+		strconv.Itoa(block3) + "." +
+		strconv.Itoa(block4)
+		// dest := net.ParseIP(key);
+		// prefixLen := rand.Intn(32);
+		// name := randString(32);
+		// p := rand.Intn(10);
+		// route := Route{dest, prefixLen, name, p}
 
-    // return key, route
-    return key
+	// return key, route
+	return key
 }
 
 func newTarget(method, url string, body []byte) target {
@@ -66,9 +67,9 @@ func newTarget(method, url string, body []byte) target {
 	}
 }
 
-func newRoute(d net.IP, l int, n string, p int) Route{
+func newRoute(d net.IP, l int, n string, p int) Route {
 
-	return Route{d, l, n, p};
+	return Route{d, l, n, p}
 }
 
 func (t *target) do() (d time.Duration, in int64, out int64, err error) {
@@ -128,44 +129,82 @@ func generateTargets(addr string, writes, localReads,
 	rand.Seed(time.Now().UTC().UnixNano())
 	var targets []target
 	var keys []string
-	for i := 0; i < writes; i++ {
+	for i := 0; i < writes/5; i++ {
 		// k, v := generateRandomRoute()
-        k := generateRandomRoute()
-		
-        for j := 0; j<5; j++ {
-            // put requests here, modify
-            // dest := net.ParseIP(key);
-            dest := net.ParseIP(k);
-            prefixLen := rand.Intn(32);
-            name := randString(32);
-            p := rand.Intn(10);
-            route := Route{dest, prefixLen, name, p}
-            data, err := json.Marshal(route);
-            //data, err := json.Marshal(v);
-            if (err == nil){
-                keys = append(keys, k)
-                t := newTarget("PUT", "http://"+addr+"/apps/lpm/"+k,
-				[]byte(data))
-                fmt.Println(route)
-                targets = append(targets, t)
-            } else {
-                fmt.Println("ERROR");
-            }
-        }
-    }
+		k := generateRandomRoute()
+		keys = append(keys, k)
+
+		for j := 0; j < 5; j++ {
+			// put requests here, modify
+			// dest := net.ParseIP(key);
+			dest := net.ParseIP(k)
+			prefixLen := rand.Intn(32)
+			name := randString(32)
+			p := rand.Intn(10)
+			route := Route{dest, prefixLen, name, p}
+			data, err := json.Marshal(route)
+			//data, err := json.Marshal(v);
+			if err == nil {
+				t := newTarget("PUT", "http://"+addr+"/apps/lpm/"+k,
+					[]byte(data))
+				fmt.Println(route)
+				targets = append(targets, t)
+			} else {
+				fmt.Println("ERROR")
+			}
+		}
+	}
 	for i := 0; i < localReads; i++ {
 
-        // modify with getting IP
+		// modify with getting IP
 		t := newTarget("GET",
-			"http://"+addr+"/apps/kvstore/"+keys[rand.Intn(len(keys))], []byte{})
+			"http://"+addr+"/apps/lpm/"+keys[rand.Intn(len(keys))], []byte{})
 		targets = append(targets, t)
 	}
 	for i := 0; i < randReads; i++ {
 
-        // modify with ip
+		// modify with ip
 		t := newTarget("GET",
-			"http://"+addr+"/apps/kvstore/"+randString(keyLen), []byte{})
+			"http://"+addr+"/apps/lpm/"+randString(keyLen), []byte{})
 		targets = append(targets, t)
+	}
+	return targets
+}
+
+func readTargets(addr string, filename string) []target {
+	var targets []target
+	f, err := os.Open(filename)
+	if err != nil {
+		panic(err)
+	}
+
+	scanner := bufio.NewScanner(f)
+	scanner.Split(bufio.ScanWords)
+
+	for scanner.Scan() {
+		typ := scanner.Text()
+		if typ == "GET" {
+			scanner.Scan()
+			ip := scanner.Text()
+			targets = append(targets, target{"GET", "http://" + addr + "/apps/lpm/" + ip, []byte{}})
+		} else if typ == "PUT" {
+			scanner.Scan()
+			ip := net.ParseIP(scanner.Text())
+			scanner.Scan()
+			len, err := strconv.ParseInt(scanner.Text(), 10, 32)
+			scanner.Scan()
+			prio, err := strconv.ParseInt(scanner.Text(), 10, 32)
+			scanner.Scan()
+			name := scanner.Text()
+			route := Route{ip, int(len), name, int(prio)}
+			data, err := json.Marshal(route)
+			if err != nil {
+				panic(err)
+			}
+			targets = append(targets, target{"PUT", "http://" + addr + "/apps/lpm/" + string(ip), []byte(data)})
+		} else {
+			panic("Unknown instruction type")
+		}
 	}
 	return targets
 }
@@ -199,14 +238,15 @@ func mustSave(results []result, w io.Writer) {
 }
 
 var (
-	addr    = flag.String("addr", "localhost:7767", "server address")
-	writes  = flag.Int("writes", 50, "number of random keys to writes per round")
-	localr  = flag.Int("localreads", 250, "number of reads from written keys")
-	randr   = flag.Int("randomreads", 0, "number of random keys to read")
-	rounds  = flag.Int("rounds", 1, "number of rounds")
-	workers = flag.Int("workers", 1, "number of parallel clients")
-	timeout = flag.Duration("timeout", 60*time.Second, "request timeout")
-	output  = flag.String("out", "bench.out", "benchmark output file")
+	addr     = flag.String("addr", "localhost:7767", "server address")
+	writes   = flag.Int("writes", 50, "number of random keys to writes per round")
+	localr   = flag.Int("localreads", 250, "number of reads from written keys")
+	randr    = flag.Int("randomreads", 0, "number of random keys to read")
+	rounds   = flag.Int("rounds", 1, "number of rounds")
+	workers  = flag.Int("workers", 1, "number of parallel clients")
+	timeout  = flag.Duration("timeout", 60*time.Second, "request timeout")
+	output   = flag.String("out", "bench.out", "benchmark output file")
+	filename = flag.String("file", "", "where to read instructions from")
 )
 
 func main() {
@@ -222,10 +262,17 @@ func main() {
 
 	ch := make(chan []result)
 	for w := 0; w < *workers; w++ {
-		go func(w int) {
-			t := generateTargets(*addr, *writes, *localr, *randr)
-			ch <- run(w, t, *rounds)
-		}(w)
+		if *filename == "" {
+			go func(w int) {
+				t := generateTargets(*addr, *writes, *localr, *randr)
+				ch <- run(w, t, *rounds)
+			}(w)
+		} else {
+			go func(w int) {
+				t := readTargets(*addr, *filename)
+				ch <- run(w, t, *rounds)
+			}(w)
+		}
 	}
 
 	var res []result
