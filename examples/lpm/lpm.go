@@ -106,14 +106,30 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	case CalcLPM:
 		lpmlog.Println("Received CalcLPM request")
 		k := net.IP(data).String()
+        
 
 		ctx, cnl := context.WithTimeout(context.Background(), 30*time.Second)
 		var res interface{}
 		var err error
+        
+        //from
+        ipLen := net.IPv4len
+        l := 32
+        ipL := net.IP(data)
+        if p4 := ipL.To4(); len(p4) == net.IPv4len {
+            ipLen = net.IPv4len
+            l = 32
+        } else {
+            ipLen = net.IPv6len
+            l = 128
+        }
+        //to
 
 		chnl := make(chan interface{})
-		for i := net.IPv4len * 8; i >= 0; i-- {
-			mask := net.CIDRMask(i, net.IPv4len*8)
+		//for i := net.IPv4len * 8; i >= 0; i-- {
+        for i := ipLen * 8; i >= 0; i-- {
+			//mask := net.CIDRMask(i, net.IPv4len*8)
+            mask := net.CIDRMask(i, ipLen*8)
 			ip := net.ParseIP(string(k))
 
 			k = ip.Mask(mask).String()
@@ -133,7 +149,8 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 		best_pri := -1
 		best_len := -1
 
-		for i := 0; i < 32; i++ {
+		//for i := 0; i < 32; i++ {
+        for i := 0; i < l; i++ {
 			x := <-chnl
 			if x != nil {
 				ret := x.(result)
@@ -197,8 +214,23 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 		chnl := make(chan interface{})
-		for i := net.IPv4len * 8; i >= 0; i-- {
-			mask := net.CIDRMask(i, net.IPv4len*8)
+        //change from here
+        //length is variable
+        ipLen := net.IPv4len
+        l := 32
+        ipL := net.ParseIP(string(k))
+        if p4 := ipL.To4(); len(p4) == net.IPv4len {
+            ipLen = net.IPv4len
+            l = 32
+        } else {
+            ipLen = net.IPv6len
+            l = 128
+        }
+        //to here
+		//for i := net.IPv4len * 8; i >= 0; i-- {
+        for i := ipLen * 8; i >= 0; i-- {
+			//mask := net.CIDRMask(i, net.IPv4len*8)
+            mask := net.CIDRMask(i, ipLen*8)
 			ip := net.ParseIP(string(k))
 
 			k = ip.Mask(mask).String()
@@ -217,8 +249,9 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		best_pri := -1
 		best_len := -1
-
-		for i := 0; i < 32; i++ {
+        
+		//for i := 0; i < 32; i++ {
+        for i := 0; i < l; i++ {
 			x := <-chnl
 			if x != nil {
 				ret := x.(result)
