@@ -1,33 +1,23 @@
 package main
 
 import (
-	"fmt"
-	bh "github.com/ayrus/beehive"
-	"github.com/ayrus/beehive/Godeps/_workspace/src/golang.org/x/net/context"
-	lpm "github.com/ayrus/beehive/examples/lpm"
-	"net"
-	"time"
+	bh "github.com/kandoo/beehive"
+	lpm "github.com/kandoo/beehive/examples/lpm"
+	//"net"
 )
 
 func main() {
 	hive := bh.NewHive()
 	options := lpm.NewLPMOptions()
-	//go func() {
-	s := lpm.Install(hive, *options)
-	//}()
-	ip := net.ParseIP("1.1.1.1")
-	go func() {
-		for i := 0; i < 100; i++ {
-			fmt.Printf("%d\n", i)
-		}
-		ctx, cnl := context.WithTimeout(context.Background(), 30*time.Second)
+	lpm.Install(hive, *options)
 
-		s.Process(ctx, lpm.CalcLPM(ip))
-
-		cnl()
-	}()
+	//TODO: This code does not belong here and should be removed.
+	// ip := net.ParseIP("1.1.1.1")
+	// go func() {
+	// 	hive.Emit(lpm.CalcLPM(ip))
+	// 	rt := lpm.Route{ip, 16, "test", 1}
+	// 	hive.Emit(lpm.Put(rt))
+	// }()
 
 	hive.Start()
-	fmt.Printf("Here")
-	//bh.Start()
 }

@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/OneOfOne/xxhash"
-	bh "github.com/ayrus/beehive"
-	"github.com/ayrus/beehive/Godeps/_workspace/src/github.com/gorilla/mux"
-	"github.com/ayrus/beehive/Godeps/_workspace/src/golang.org/x/net/context"
+	bh "github.com/kandoo/beehive"
+	"github.com/kandoo/beehive/Godeps/_workspace/src/github.com/gorilla/mux"
+	"github.com/kandoo/beehive/Godeps/_workspace/src/golang.org/x/net/context"
 )
 
 const (
@@ -31,18 +31,16 @@ var (
 
 var lpmlog *log.Logger
 
-type put struct {
-	Key string
-	Val []byte
-}
+type Put Route
 
-type get string
+type Get string
+
 type result struct {
 	Key string `json:"request"`
 	Val Route  `json:"route"`
 }
 
-type del string
+type Del string
 
 type lpm struct {
 	*bh.Sync
@@ -74,8 +72,7 @@ func Unmarshal(data []byte) Route {
 	return rt
 }
 
-func GetKey(data []byte) string {
-	rt := Unmarshal(data)
+func GetKey(rt Route) string {
 	msk := net.CIDRMask(rt.Len, 32)
 	k := rt.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(rt.Len), 10)
 	return k
@@ -83,21 +80,23 @@ func GetKey(data []byte) string {
 
 func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	switch data := msg.Data().(type) {
-	case put:
-		lpmlog.Printf("Inserted %s\n", GetKey(data.Val))
-		return ctx.Dict(dict).Put(GetKey(data.Val), data.Val)
-	case get:
-		res, err := ctx.Dict(dict).Get(string(data))
-		lpmlog.Printf("Looking up %s\n", data)
-		if err == nil && len(res) > 0 {
-			ctx.ReplyTo(msg, result{Key: string(data), Val: Unmarshal(res)})
+	case Put:
+		rt := Route(data)
+		lpmlog.Printf("Inserted %s\n", GetKey(rt))
+		return ctx.Dict(dict).PutGob(GetKey(rt), &rt)
+	case Get:
+		var rt Route
+		err := ctx.Dict(dict).GetGob(string(data), &rt)
+		lpmlog.Printf("Looking up - %s\n", data)
+		if err == nil{
+			ctx.ReplyTo(msg, result{Key: string(data), Val: rt})
 		} else {
 			ctx.ReplyTo(msg, nil)
 		}
 
 		return nil
 
-	case del:
+	case Del:
 		lpmlog.Printf("Delete %s\n", data)
 		return ctx.Dict(dict).Del(string(data))
 	case warmup:
@@ -136,7 +135,7 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 			req := k + "/" + strconv.FormatInt(int64(i), 10)
 
 			go func(req string) {
-				res, err = s.Process(ctx, get(req))
+				res, err = s.Process(ctx, Get(req))
 
 				if err == nil {
 					chnl <- res
@@ -175,13 +174,13 @@ func (s *lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 	var k string
 
 	switch data := msg.Data().(type) {
-	case put:
-		k = GetKey(data.Val)
+	case Put:
+		k = GetKey(Route(data))
 		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
-	case get:
+	case Get:
 		k = string(data)
 		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
-	case del:
+	case Del:
 		k = string(data)
 		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
 	case warmup:
@@ -227,6 +226,7 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             l = 128
         }
         //to here
+
 		//for i := net.IPv4len * 8; i >= 0; i-- {
         for i := ipLen * 8; i >= 0; i-- {
 			//mask := net.CIDRMask(i, net.IPv4len*8)
@@ -237,7 +237,7 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			req := k + "/" + strconv.FormatInt(int64(i), 10)
 
 			go func(req string) {
-				res, err = s.Process(ctx, get(req))
+				res, err = s.Process(ctx, Get(req))
 
 				if err == nil {
 					chnl <- res
@@ -270,12 +270,13 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var v []byte
 		v, err = ioutil.ReadAll(r.Body)
 		lpmlog.Println("HTTP Received Put")
-		res, err = s.Process(ctx, put{Key: k, Val: v})
+		res, err = s.Process(ctx, Put(Unmarshal(v)))
 	case "DELETE":
 		var v []byte
 		v, err = ioutil.ReadAll(r.Body)
+		rt := Unmarshal(v)
 
-		res, err = s.Process(ctx, del(GetKey(v)))
+		res, err = s.Process(ctx, Del(GetKey(rt)))
 	}
 	cnl()
 
@@ -309,7 +310,6 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type LPMOptions struct {
 	replFactor int //= flag.Int("lpm.rf", 3, "replication factor")
 	buckets    int //= flag.Int("lpm.b", 50, "number of buckets")
-	//cpuprofile  //= flag.String("lpm.cpuprofile", "", "write cpu profile to file")
 	raftlog bool //= flag.Bool("lpm.raftlog", false, "whether to print raft log")
 	lg      bool //            = flag.Bool("lpm.log", false, "whether to print lpm log")
 	random  bool //= flag.Bool("lpm.rand", false, "whether to use random placement")
@@ -320,10 +320,7 @@ func NewLPMOptions() *LPMOptions {
 	return &LPMOptions{replFactor: 3, buckets: 5, raftlog: false, lg: false, random: false, warmup: true}
 }
 
-func Install(hive bh.Hive, options LPMOptions) *bh.Sync {
-	//func main() {
-	//	flag.Parse()
-	//options := NewLPMOptions()
+func Install(hive bh.Hive, options LPMOptions){
 	rand.Seed(time.Now().UnixNano())
 
 	if !options.raftlog {
@@ -349,38 +346,32 @@ func Install(hive bh.Hive, options LPMOptions) *bh.Sync {
 
 	s.Handle(warmup{}, kv)
 	s.Handle(CalcLPM{}, kv)
-	s.Handle(put{}, kv)
-	s.Handle(get(""), kv)
-	s.Handle(del(""), kv)
+	s.Handle(Put{}, kv)
+	s.Handle(Get(""), kv)
+	s.Handle(Del(""), kv)
+	
+	a.Handle(CalcLPM{}, kv)
+	a.Handle(Put{}, kv)
+	a.Handle(Get(""), kv)
+	a.Handle(Del(""), kv)
 	a.HandleHTTP("/{key}", kv)
+
 
 	go func() {
 		ctx, cnl := context.WithTimeout(context.Background(), 30*time.Second)
 
 		if options.warmup && options.buckets > 0 {
 			for i := 0; i < options.buckets; i++ {
-				//go func(i int) {
-				//					fmt.Printf("%d\n", i)
 				s.Process(ctx, warmup{i})
-				//}(i)
 			}
-			//go func() {
-			//s.Process(ctx, CalcLPM{})
 
-			//}()
 		}
-		//fmt.Println("Done warming up")
 
 		cnl()
 	}()
-
-	//hive.Start()
-	//	fmt.Println("Done wagfrming up")
-
-	return s
-
 }
 
 func init() {
 	gob.Register(result{})
+	gob.Register(Route{})
 }
