@@ -1,160 +1,99 @@
-// Benchmarks for the key value store.
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"bufio"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
+	"log"
 	"math/rand"
-	"net/http"
 	"os"
+	"runtime/pprof"
 	"time"
+
+	bh "github.com/kandoo/beehive"
+	"github.com/kandoo/beehive/Godeps/_workspace/src/golang.org/x/net/context"
+	"github.com/kandoo/beehive/examples/kvstore/store"
 )
-
-const (
-	keyLen     = 16
-	minBodyLen = 16
-	maxBodyLen = 512
-)
-
-var client *http.Client
-
-type target struct {
-	method string
-	url    string
-	body   []byte
-}
-
-func newTarget(method, url string, body []byte) target {
-	return target{
-		method: method,
-		url:    url,
-		body:   body,
-	}
-}
-
-func (t *target) do() (d time.Duration, in int64, out int64, err error) {
-	req, err := http.NewRequest(t.method, t.url, bytes.NewBuffer(t.body))
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	in = req.ContentLength
-	start := time.Now()
-	res, err := client.Do(req)
-	d = time.Since(start)
-	if err != nil {
-		return
-	}
-	defer func() {
-		io.Copy(ioutil.Discard, res.Body)
-		res.Body.Close()
-	}()
-	b, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return
-	}
-	out = int64(len(b))
-	return
-}
-
-type result struct {
-	Method string        `json:"method"`
-	URL    string        `json:"url"`
-	In     int64         `json:"in"`
-	Out    int64         `json:"out"`
-	Dur    time.Duration `json:"dur"`
-	Err    string        `json:"err"`
-}
-
-func randRange(from, to int) int {
-	return rand.Intn(to-from) + from
-}
-
-func randChar() byte {
-	a := byte('a')
-	z := byte('z')
-	return byte(randRange(int(a), int(z)))
-}
-
-func randString(length int) string {
-	b := make([]byte, length)
-	for i := 0; i < length; i++ {
-		b[i] = randChar()
-	}
-	return string(b)
-}
-
-func generateTargets(addr string, writes, localReads,
-	randReads int) []target {
-
-	rand.Seed(time.Now().UTC().UnixNano())
-	var targets []target
-	var keys []string
-	for i := 0; i < writes; i++ {
-		k := randString(keyLen)
-		keys = append(keys, k)
-		bl := randRange(minBodyLen, maxBodyLen)
-		t := newTarget("PUT", "http://"+addr+"/apps/kvstore/"+k,
-			[]byte(randString(bl)))
-		targets = append(targets, t)
-	}
-	for i := 0; i < localReads; i++ {
-		t := newTarget("GET",
-			"http://"+addr+"/apps/kvstore/"+keys[rand.Intn(len(keys))], []byte{})
-		targets = append(targets, t)
-	}
-	for i := 0; i < randReads; i++ {
-		t := newTarget("GET",
-			"http://"+addr+"/apps/kvstore/"+randString(keyLen), []byte{})
-		targets = append(targets, t)
-	}
-	return targets
-}
-
-func run(id int, targets []target, rounds int) []result {
-	results := make([]result, 0, len(targets)*rounds)
-	for i := 0; i < rounds; i++ {
-		for j, t := range targets {
-			fmt.Printf("%v-%v/%v-%s ", id, i, j, t.method)
-			var err error
-			res := result{
-				Method: t.method,
-				URL:    t.url,
-			}
-			res.Dur, res.In, res.Out, err = t.do()
-			if err != nil {
-				res.Err = err.Error()
-			}
-			results = append(results, res)
-		}
-	}
-	return results
-}
-
-func mustSave(results []result, w io.Writer) {
-	b, err := json.Marshal(results)
-	if err != nil {
-		panic(err)
-	}
-	w.Write(b)
-}
 
 var (
-	addr    = flag.String("addr", "localhost:7767", "server address")
-	writes  = flag.Int("writes", 10, "number of random keys to writes per round")
-	localr  = flag.Int("localreads", 100, "number of reads from written keys")
-	randr   = flag.Int("randomreads", 0, "number of random keys to read")
-	rounds  = flag.Int("rounds", 1, "number of rounds")
-	workers = flag.Int("workers", 1, "number of parallel clients")
-	timeout = flag.Duration("timeout", 60*time.Second, "request timeout")
-	output  = flag.String("out", "bench.out", "benchmark output file")
+	replFactor = flag.Int("kv.rf", 3, "replication factor")
+	buckets    = flag.Int("kv.b", 1024, "number of buckets")
+	rounds     = flag.Int("kv.r", 100, "rounds of benchmark")
+	numkeys    = flag.Int("kv.n", 1024, "number of keys")
+	tries      = flag.Int("kv.t", 1024, "number of requests sent per key")
+	get        = flag.Bool("kv.get", false, "use gets")
+	cpuprofile = flag.String("kv.cpuprofile", "", "write cpu profile to file")
+	quiet      = flag.Bool("kv.quiet", false, "no raft log")
+	random     = flag.Bool("kv.rand", false, "whether to use random placement")
+	output     = flag.String("kv.output", "bench.out", "the output file")
 )
 
 func main() {
 	flag.Parse()
+	rand.Seed(time.Now().UnixNano())
+	if *quiet {
+		log.SetOutput(ioutil.Discard)
+	}
+
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			panic(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+
+	os.RemoveAll(bh.DefaultCfg.StatePath)
+
+	hive := bh.NewHive()
+	app := hive.NewApp("kvstore", bh.Persistent(*replFactor))
+	sync := bh.NewSync(app)
+	kvs := &store.KVStore{
+		Sync:    sync,
+		Buckets: uint64(*buckets),
+	}
+	app.Handle(store.Put{}, kvs)
+	app.Handle(store.Get(""), kvs)
+	sync.Handle(store.Put{}, kvs)
+	sync.Handle(store.Get(""), kvs)
+	go hive.Start()
+
+	time.Sleep(4 * time.Minute)
+
+	keys := make([]string, *numkeys)
+	reqs := make([]interface{}, *numkeys)
+	val := []byte("val")
+	for i, _ := range keys {
+		keys[i] = fmt.Sprintf("%dkeys%d", i, i)
+		if *get {
+			reqs[i] = store.Get(keys[i])
+		} else {
+			reqs[i] = store.Put{Key: keys[i], Val: val}
+		}
+	}
+
+	for _, k := range keys {
+		hive.Emit(store.Put{Key: k, Val: val})
+		sync.Process(context.Background(), store.Get(k))
+	}
+
+	ts := make([]time.Duration, *rounds)
+	for i := 0; i < *rounds; i++ {
+		start := time.Now()
+		for j := 0; j < *tries; j++ {
+			for _, r := range reqs {
+				hive.Emit(r)
+			}
+		}
+		for _, k := range keys {
+			sync.Process(context.Background(), store.Get(k))
+		}
+		ts[i] = time.Since(start)
+	}
+
+	hive.Stop()
 
 	f, err := os.Create(*output)
 	if err != nil {
@@ -162,19 +101,9 @@ func main() {
 	}
 	defer f.Close()
 
-	client = &http.Client{Timeout: *timeout}
-
-	ch := make(chan []result)
-	for w := 0; w < *workers; w++ {
-		go func(w int) {
-			t := generateTargets(*addr, *writes, *localr, *randr)
-			ch <- run(w, t, *rounds)
-		}(w)
+	w := bufio.NewWriter(f)
+	for _, t := range ts {
+		fmt.Fprintf(w, "%v\n", uint64(t))
 	}
-
-	var res []result
-	for i := 0; i < *workers; i++ {
-		res = append(res, <-ch...)
-	}
-	mustSave(res, f)
+	w.Flush()
 }
