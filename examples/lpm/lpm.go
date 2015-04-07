@@ -33,12 +33,7 @@ var lpmlog *log.Logger
 
 type Put Route
 
-type Get string
-
-type result struct {
-	Key string `json:"request"`
-	Val Route  `json:"route"`
-}
+type get string
 
 type Del string
 
@@ -60,7 +55,7 @@ type Route struct {
 	Priority int    `json:"priority"`
 }
 
-func Unmarshal(data []byte) Route {
+func unmarshal(data []byte) Route {
 	var rt Route
 	var terr error
 
@@ -72,24 +67,34 @@ func Unmarshal(data []byte) Route {
 	return rt
 }
 
-func GetKey(rt Route) string {
-	msk := net.CIDRMask(rt.Len, 32)
+func iplen(ip net.IP) int {
+	if ip.To4() != nil {
+		return net.IPv4len
+	} else {
+		return net.IPv6len
+	}
+}
+
+func getKey(rt Route) string {
+	msk := net.CIDRMask(rt.Len, iplen(rt.Dest)*8)
 	k := rt.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(rt.Len), 10)
 	return k
 }
 
 func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	switch data := msg.Data().(type) {
+
 	case Put:
 		rt := Route(data)
-		lpmlog.Printf("Inserted %s\n", GetKey(rt))
-		return ctx.Dict(dict).PutGob(GetKey(rt), &rt)
-	case Get:
+		lpmlog.Printf("Inserted %s\n", getKey(rt))
+		return ctx.Dict(dict).PutGob(getKey(rt), &rt)
+
+	case get:
 		var rt Route
 		err := ctx.Dict(dict).GetGob(string(data), &rt)
 		lpmlog.Printf("Looking up - %s\n", data)
-		if err == nil{
-			ctx.ReplyTo(msg, result{Key: string(data), Val: rt})
+		if err == nil {
+			ctx.ReplyTo(msg, rt)
 		} else {
 			ctx.ReplyTo(msg, nil)
 		}
@@ -99,43 +104,27 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	case Del:
 		lpmlog.Printf("Delete %s\n", data)
 		return ctx.Dict(dict).Del(string(data))
+
 	case warmup:
 		lpmlog.Printf("Created bee #%d", data.bnum)
 		return nil
+
 	case CalcLPM:
 		lpmlog.Println("Received CalcLPM request")
-		k := net.IP(data).String()
-        
 
-		ctx, cnl := context.WithTimeout(context.Background(), 30*time.Second)
+		netctx, cnl := context.WithCancel(context.Background())
 		var res interface{}
 		var err error
-        
-        //from
-        ipLen := net.IPv4len
-        l := 32
-        ipL := net.IP(data)
-        if p4 := ipL.To4(); len(p4) == net.IPv4len {
-            ipLen = net.IPv4len
-            l = 32
-        } else {
-            ipLen = net.IPv6len
-            l = 128
-        }
-        //to
 
+		ip := net.IP(data)
+		ln := iplen(ip) * 8
 		chnl := make(chan interface{})
-		//for i := net.IPv4len * 8; i >= 0; i-- {
-        for i := ipLen * 8; i >= 0; i-- {
-			//mask := net.CIDRMask(i, net.IPv4len*8)
-            mask := net.CIDRMask(i, ipLen*8)
-			ip := net.ParseIP(string(k))
 
-			k = ip.Mask(mask).String()
-			req := k + "/" + strconv.FormatInt(int64(i), 10)
-
+		for i := ln; i >= 0; i-- {
+			mask := net.CIDRMask(i, ln)
+			req := ip.Mask(mask).String() + "/" + strconv.FormatInt(int64(i), 10)
 			go func(req string) {
-				res, err = s.Process(ctx, Get(req))
+				res, err = s.Process(netctx, get(req))
 
 				if err == nil {
 					chnl <- res
@@ -148,20 +137,20 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 		best_pri := -1
 		best_len := -1
 
-		//for i := 0; i < 32; i++ {
-        for i := 0; i < l; i++ {
+		for i := 0; i < ln; i++ {
 			x := <-chnl
 			if x != nil {
-				ret := x.(result)
-				rt := ret.Val
+				rt := x.(Route)
 				if rt.Priority > best_pri || (rt.Priority == best_pri && rt.Len > best_len) {
 					res = rt
 					best_pri = rt.Priority
 					best_len = rt.Len
 				}
-				lpmlog.Printf("Candidate: %s\n", ret)
+				lpmlog.Printf("Candidate: %s\n", rt)
 			}
 		}
+
+		ctx.ReplyTo(msg, res)
 
 		cnl()
 
@@ -175,9 +164,9 @@ func (s *lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 
 	switch data := msg.Data().(type) {
 	case Put:
-		k = GetKey(Route(data))
+		k = getKey(Route(data))
 		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
-	case Get:
+	case get:
 		k = string(data)
 		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
 	case Del:
@@ -186,7 +175,7 @@ func (s *lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 	case warmup:
 		k = strconv.FormatUint(uint64(data.bnum), 16)
 	case CalcLPM:
-		k = strconv.FormatInt(int64(rand.Intn(int(s.buckets))), 16)
+		k = strconv.FormatInt(int64(rand.Intn(int(s.buckets)))+int64(s.buckets), 16)
 	}
 
 	cells := bh.MappedCells{
@@ -199,85 +188,35 @@ func (s *lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 }
 
 func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	lpmlog.Println("Received HTTP")
+	lpmlog.Println("Received HTTP request")
+
 	k, ok := mux.Vars(r)["key"]
 	if !ok {
 		http.Error(w, "no key in the url", http.StatusBadRequest)
 		return
 	}
 
-	ctx, cnl := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cnl := context.WithCancel(context.Background())
+
 	var res interface{}
 	var err error
 
 	switch r.Method {
 	case "GET":
-		chnl := make(chan interface{})
-        //change from here
-        //length is variable
-        ipLen := net.IPv4len
-        l := 32
-        ipL := net.ParseIP(string(k))
-        if p4 := ipL.To4(); len(p4) == net.IPv4len {
-            ipLen = net.IPv4len
-            l = 32
-        } else {
-            ipLen = net.IPv6len
-            l = 128
-        }
-        //to here
-
-		//for i := net.IPv4len * 8; i >= 0; i-- {
-        for i := ipLen * 8; i >= 0; i-- {
-			//mask := net.CIDRMask(i, net.IPv4len*8)
-            mask := net.CIDRMask(i, ipLen*8)
-			ip := net.ParseIP(string(k))
-
-			k = ip.Mask(mask).String()
-			req := k + "/" + strconv.FormatInt(int64(i), 10)
-
-			go func(req string) {
-				res, err = s.Process(ctx, Get(req))
-
-				if err == nil {
-					chnl <- res
-				} else {
-					chnl <- nil
-				}
-			}(req)
-		}
-
-		best_pri := -1
-		best_len := -1
-        
-		//for i := 0; i < 32; i++ {
-        for i := 0; i < l; i++ {
-			x := <-chnl
-			if x != nil {
-				ret := x.(result)
-				rt := ret.Val
-				if rt.Priority > best_pri || (rt.Priority == best_pri && rt.Len > best_len) {
-					res = rt
-					best_pri = rt.Priority
-					best_len = rt.Len
-				}
-				lpmlog.Printf("Candidate: %s\n", ret)
-			}
-		}
-
-		lpmlog.Println("HTTP Served LPM")
+		res, err = s.Process(ctx, CalcLPM(net.ParseIP(k)))
+		lpmlog.Println(res)
 	case "PUT":
 		var v []byte
 		v, err = ioutil.ReadAll(r.Body)
-		lpmlog.Println("HTTP Received Put")
-		res, err = s.Process(ctx, Put(Unmarshal(v)))
+		res, err = s.Process(ctx, Put(unmarshal(v)))
 	case "DELETE":
 		var v []byte
 		v, err = ioutil.ReadAll(r.Body)
-		rt := Unmarshal(v)
+		rt := unmarshal(v)
 
-		res, err = s.Process(ctx, Del(GetKey(rt)))
+		res, err = s.Process(ctx, Del(getKey(rt)))
 	}
+
 	cnl()
 
 	if err != nil {
@@ -308,19 +247,19 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type LPMOptions struct {
-	replFactor int //= flag.Int("lpm.rf", 3, "replication factor")
-	buckets    int //= flag.Int("lpm.b", 50, "number of buckets")
-	raftlog bool //= flag.Bool("lpm.raftlog", false, "whether to print raft log")
-	lg      bool //            = flag.Bool("lpm.log", false, "whether to print lpm log")
-	random  bool //= flag.Bool("lpm.rand", false, "whether to use random placement")
-	warmup  bool //= flag.Bool("lpm.warmup", false, "whether to warm up beehive before processing requests")
+	replFactor int  //= flag.Int("lpm.rf", 3, "replication factor")
+	buckets    int  //= flag.Int("lpm.b", 50, "number of buckets")
+	raftlog    bool //= flag.Bool("lpm.raftlog", false, "whether to print raft log")
+	lg         bool //            = flag.Bool("lpm.log", false, "whether to print lpm log")
+	random     bool //= flag.Bool("lpm.rand", false, "whether to use random placement")
+	warmup     bool //= flag.Bool("lpm.warmup", false, "whether to warm up beehive before processing requests")
 }
 
 func NewLPMOptions() *LPMOptions {
 	return &LPMOptions{replFactor: 3, buckets: 5, raftlog: false, lg: false, random: false, warmup: true}
 }
 
-func Install(hive bh.Hive, options LPMOptions){
+func Install(hive bh.Hive, options LPMOptions) {
 	rand.Seed(time.Now().UnixNano())
 
 	if !options.raftlog {
@@ -347,21 +286,21 @@ func Install(hive bh.Hive, options LPMOptions){
 	s.Handle(warmup{}, kv)
 	s.Handle(CalcLPM{}, kv)
 	s.Handle(Put{}, kv)
-	s.Handle(Get(""), kv)
+	s.Handle(get(""), kv)
 	s.Handle(Del(""), kv)
-	
+
 	a.Handle(CalcLPM{}, kv)
 	a.Handle(Put{}, kv)
-	a.Handle(Get(""), kv)
+	a.Handle(get(""), kv)
 	a.Handle(Del(""), kv)
+	a.HandleHTTP("", kv)
 	a.HandleHTTP("/{key}", kv)
 
-
 	go func() {
-		ctx, cnl := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cnl := context.WithCancel(context.Background())
 
 		if options.warmup && options.buckets > 0 {
-			for i := 0; i < options.buckets; i++ {
+			for i := 0; i < options.buckets*2; i++ {
 				s.Process(ctx, warmup{i})
 			}
 
@@ -372,6 +311,5 @@ func Install(hive bh.Hive, options LPMOptions){
 }
 
 func init() {
-	gob.Register(result{})
 	gob.Register(Route{})
 }
