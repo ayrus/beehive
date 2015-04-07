@@ -35,7 +35,13 @@ type Put Route
 
 type get string
 
-type Del string
+type Del struct {
+	Dest	net.IP	`json:"dest"`
+	Len		int		`json:len`
+	Exact	bool	`json:exact`
+}
+
+type delKey string
 
 type lpm struct {
 	*bh.Sync
@@ -67,6 +73,18 @@ func unmarshal(data []byte) Route {
 	return rt
 }
 
+func unmarshalDel(data []byte) Del {
+	var dl Del
+	var terr error
+
+	terr = json.Unmarshal(data, &dl)
+	if terr != nil {
+		lpmlog.Println("Unmarshal error: ", terr)
+	}
+
+	return dl
+}
+
 func iplen(ip net.IP) int {
 	if ip.To4() != nil {
 		return net.IPv4len
@@ -78,6 +96,12 @@ func iplen(ip net.IP) int {
 func getKey(rt Route) string {
 	msk := net.CIDRMask(rt.Len, iplen(rt.Dest)*8)
 	k := rt.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(rt.Len), 10)
+	return k
+}
+
+func getDelKey(dl Del) string {
+	msk := net.CIDRMask(dl.Len, iplen(dl.Dest)*8)
+	k := dl.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(dl.Len), 10)
 	return k
 }
 
@@ -97,7 +121,7 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
             lpmlog.Printf("Inserted %s\n", getKey(rt1))
             return ctx.Dict(dict).PutGob(getKey(rt1), &rt1)
         }
-		
+
 
 	case get:
 		var rt Route
@@ -112,8 +136,41 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 		return nil
 
 	case Del:
-		lpmlog.Printf("Delete %s\n", data)
-		return ctx.Dict(dict).Del(string(data))
+		dl := Del(data)
+
+		lpmlog.Println("Received Delete Request")
+
+		var err error
+		netctx, cnl := context.WithCancel(context.Background())
+
+
+		if (!dl.Exact) {
+			for i := dl.Len; i <= iplen(dl.Dest) * 8; i++{
+				msk := net.CIDRMask(i, iplen(dl.Dest)*8)
+				ck := dl.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(i), 10)
+				go func(req string){
+					_, err = s.Process(netctx, delKey(req))
+					if (err != nil){
+						lpmlog.Println(err)
+					}
+				}(ck)
+			}
+		} else {
+			go func(req string){
+				_, err = s.Process(netctx, delKey(req))
+				if (err != nil){
+					lpmlog.Println(err)
+				}
+			}(getDelKey(dl))
+		}
+		cnl()
+		return nil
+
+	case delKey:
+		dk := string(data)
+		lpmlog.Println("Deleting!", dk)
+
+		return ctx.Dict(dict).Del(dk)
 
 	case warmup:
 		lpmlog.Printf("Created bee #%d", data.bnum)
@@ -165,6 +222,7 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 		cnl()
 
 		return nil
+
 	}
 	return errInvalid
 }
@@ -180,6 +238,9 @@ func (s *lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 		k = string(data)
 		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
 	case Del:
+		k = getDelKey(Del(data))
+		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
+	case delKey:
 		k = string(data)
 		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
 	case warmup:
@@ -222,9 +283,8 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "DELETE":
 		var v []byte
 		v, err = ioutil.ReadAll(r.Body)
-		rt := unmarshal(v)
 
-		res, err = s.Process(ctx, Del(getKey(rt)))
+		res, err = s.Process(ctx, Del(unmarshalDel(v)))
 	}
 
 	cnl()
@@ -297,12 +357,14 @@ func Install(hive bh.Hive, options LPMOptions) {
 	s.Handle(CalcLPM{}, kv)
 	s.Handle(Put{}, kv)
 	s.Handle(get(""), kv)
-	s.Handle(Del(""), kv)
+	s.Handle(Del{}, kv)
+	s.Handle(delKey(""), kv)
 
 	a.Handle(CalcLPM{}, kv)
 	a.Handle(Put{}, kv)
 	a.Handle(get(""), kv)
-	a.Handle(Del(""), kv)
+	a.Handle(Del{}, kv)
+	a.Handle(delKey(""), kv)
 	a.HandleHTTP("", kv)
 	a.HandleHTTP("/{key}", kv)
 
