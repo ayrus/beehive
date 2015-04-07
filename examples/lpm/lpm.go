@@ -85,16 +85,17 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	switch data := msg.Data().(type) {
 
 	case Put:
-		rt := Route(data)
-        prev, err := ctx.Dict(dict).GetGob(string(data), &rt)
+		rt1 := Route(data)
+        rt2 := Route(data)
+        err := ctx.Dict(dict).GetGob(getKey(rt2), &rt2)
         if err == nil {
-            if rt.Priority > prev.Priority {
-                lpmlog.Printf("Inserted %s\n", getKey(rt))
-                return ctx.Dict(dict).PutGob(getKey(rt), &rt)
+            if rt1.Priority > rt2.Priority {
+                lpmlog.Printf("Inserted %s\n", getKey(rt1))
+                return ctx.Dict(dict).PutGob(getKey(rt1), &rt1)
             }
         } else {
-            lpmlog.Printf("Inserted %s\n", getKey(rt))
-            return ctx.Dict(dict).PutGob(getKey(rt), &rt)
+            lpmlog.Printf("Inserted %s\n", getKey(rt1))
+            return ctx.Dict(dict).PutGob(getKey(rt1), &rt1)
         }
 		
 
