@@ -110,8 +110,8 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 
 	case Put:
 		rt1 := Route(data)
-        rt2 := Route(data)
-        err := ctx.Dict(dict).GetGob(getKey(rt2), &rt2)
+        var rt2 Route
+        err := ctx.Dict(dict).GetGob(getKey(rt1), &rt2)
         if err == nil {
             if rt1.Priority > rt2.Priority {
                 lpmlog.Printf("Inserted %s\n", getKey(rt1))
