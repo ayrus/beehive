@@ -36,9 +36,9 @@ type Put Route
 type get string
 
 type Del struct {
-	Dest	net.IP	`json:"dest"`
-	Len		int		`json:len`
-	Exact	bool	`json:exact`
+	Dest  net.IP `json:"dest"`
+	Len   int    `json:len`
+	Exact bool   `json:exact`
 }
 
 type delKey string
@@ -60,7 +60,6 @@ type Route struct {
 	Name     string `json:"name"`
 	Priority int    `json:"priority"`
 }
-
 
 func unmarshal(data []byte) (Route, error) {
 	var rt Route
@@ -113,18 +112,19 @@ func (s *Lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 
 	case Put:
 		rt1 := Route(data)
-        var rt2 Route
-        err := ctx.Dict(dict).GetGob(getKey(rt1), &rt2)
-        if err == nil {
-            if rt1.Priority > rt2.Priority {
-                lpmlog.Printf("Inserted %s\n", getKey(rt1))
-                return ctx.Dict(dict).PutGob(getKey(rt1), &rt1)
-            }
-        } else {
-            lpmlog.Printf("Inserted %s\n", getKey(rt1))
-            return ctx.Dict(dict).PutGob(getKey(rt1), &rt1)
-        }
-
+		var rt2 Route
+		err := ctx.Dict(dict).GetGob(getKey(rt1), &rt2)
+		if err == nil {
+			if rt1.Priority > rt2.Priority {
+				lpmlog.Printf("Inserted %s\n", getKey(rt1))
+				return ctx.Dict(dict).PutGob(getKey(rt1), &rt1)
+			} else {
+				return nil
+			}
+		} else {
+			lpmlog.Printf("Inserted %s\n", getKey(rt1))
+			return ctx.Dict(dict).PutGob(getKey(rt1), &rt1)
+		}
 
 	case get:
 		var rt Route
@@ -146,22 +146,21 @@ func (s *Lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 		var err error
 		netctx, cnl := context.WithCancel(context.Background())
 
-
-		if (!dl.Exact) {
-			for i := dl.Len; i <= iplen(dl.Dest) * 8; i++{
+		if !dl.Exact {
+			for i := dl.Len; i <= iplen(dl.Dest)*8; i++ {
 				msk := net.CIDRMask(i, iplen(dl.Dest)*8)
 				ck := dl.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(i), 10)
-				go func(req string){
+				go func(req string) {
 					_, err = s.Process(netctx, delKey(req))
-					if (err != nil){
+					if err != nil {
 						lpmlog.Println(err)
 					}
 				}(ck)
 			}
 		} else {
-			go func(req string){
+			go func(req string) {
 				_, err = s.Process(netctx, delKey(req))
-				if (err != nil){
+				if err != nil {
 					lpmlog.Println(err)
 				}
 			}(getDelKey(dl))

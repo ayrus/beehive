@@ -1,8 +1,8 @@
 package main
 
 import (
+	lpm "github.com/ayrus/beehive/examples/lpm"
 	bh "github.com/kandoo/beehive"
-	lpm "github.com/kandoo/beehive/examples/lpm"
 	//"net"
 )
 
