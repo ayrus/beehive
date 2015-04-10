@@ -60,16 +60,17 @@ type Route struct {
 	Priority int    `json:"priority"`
 }
 
-func Unmarshal(data []byte) Route {
+func Unmarshal(data []byte) (Route, error) {
 	var rt Route
 	var terr error
 
 	terr = json.Unmarshal(data, &rt)
 	if terr != nil {
 		lpmlog.Println("Unmarshal error: ", terr)
+		return rt, errors.New(errInvalid.Error())
 	}
 
-	return rt
+	return rt, nil
 }
 
 func GetKey(rt Route) string {
@@ -268,13 +269,32 @@ func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lpmlog.Println("HTTP Served LPM")
 	case "PUT":
 		var v []byte
+		var rt Route
 		v, err = ioutil.ReadAll(r.Body)
+		if err != nil {
+			break
+		}
+
 		lpmlog.Println("HTTP Received Put")
-		res, err = s.Process(ctx, Put(Unmarshal(v)))
+		rt, err = Unmarshal(v)
+		if err != nil {
+			break
+		}
+
+		res, err = s.Process(ctx, Put(rt))
+
 	case "DELETE":
 		var v []byte
+		var rt Route
 		v, err = ioutil.ReadAll(r.Body)
-		rt := Unmarshal(v)
+		if err != nil {
+			break
+		}
+
+		rt, err = Unmarshal(v)
+		if err != nil {
+			break
+		}
 
 		res, err = s.Process(ctx, Del(GetKey(rt)))
 	}
