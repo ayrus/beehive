@@ -43,7 +43,7 @@ type Del struct {
 
 type delKey string
 
-type lpm struct {
+type Lpm struct {
 	*bh.Sync
 	buckets uint64
 }
@@ -108,7 +108,7 @@ func getDelKey(dl Del) string {
 	return k
 }
 
-func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
+func (s *Lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	switch data := msg.Data().(type) {
 
 	case Put:
@@ -230,7 +230,7 @@ func (s *lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	return errInvalid
 }
 
-func (s *lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
+func (s *Lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 	var k string
 
 	switch data := msg.Data().(type) {
@@ -261,7 +261,7 @@ func (s *lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 	return cells
 }
 
-func (s *lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *Lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	lpmlog.Println("Received HTTP request")
 
 	k, ok := mux.Vars(r)["key"]
@@ -352,7 +352,7 @@ func NewLPMOptions() *LPMOptions {
 	return &LPMOptions{replFactor: 3, buckets: 5, raftlog: false, lg: false, random: false, warmup: true}
 }
 
-func Install(hive bh.Hive, options LPMOptions) {
+func Install(hive bh.Hive, options LPMOptions) *Lpm {
 	rand.Seed(time.Now().UnixNano())
 
 	if !options.raftlog {
@@ -371,7 +371,7 @@ func Install(hive bh.Hive, options LPMOptions) {
 	a := hive.NewApp("lpm", opts...)
 	s := bh.NewSync(a)
 
-	kv := &lpm{
+	kv := &Lpm{
 		Sync:    s,
 		buckets: uint64(options.buckets),
 	}
@@ -403,6 +403,8 @@ func Install(hive bh.Hive, options LPMOptions) {
 
 		cnl()
 	}()
+
+	return kv
 }
 
 func init() {
