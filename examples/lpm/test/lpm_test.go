@@ -43,7 +43,7 @@ Test a simple LPM where there is only one entry in the database and it is a hit
 */
 func TestSimpleLPM(t *testing.T){
     setupTest()
-    testLog.Println("TestSimpleLPM1")
+    testLog.Println("TestSimpleLPM")
 
 
     go hive.Start()
@@ -125,6 +125,28 @@ func TestMiss2(t *testing.T){
             if res != nil{
                 t.Error("Found a result when there should not have been one: ", res)
             }
+        }
+    } else {
+        t.Error("Error calculating LPM: ", err)
+    }
+
+    hive.Stop()
+    teardownTest()
+}
+
+/*
+Test the db is empty
+*/
+func TestMissEmpty(t *testing.T){
+    setupTest()
+    testLog.Println("TestMissEmpty")
+
+    go hive.Start()
+
+    res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("255.0.0.0")))
+    if (err == nil){
+        if res != nil{
+            t.Error("Found a result when there should not have been one: ", res)
         }
     } else {
         t.Error("Error calculating LPM: ", err)
