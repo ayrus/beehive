@@ -6,7 +6,7 @@ import (
     "os"
     "log"
     bh "github.com/kandoo/beehive"
-    lpm "github.com/ayrus/beehive/examples/lpm"
+    lpm "github.com/kandoo/beehive/examples/lpm"
     "github.com/kandoo/beehive/Godeps/_workspace/src/golang.org/x/net/context"
 
 )
