@@ -55,7 +55,10 @@ func TestSimpleLPM(t *testing.T){
          2,
     }
 
-    kv.Process(context.Background(), lpm.Put(r))
+    _, err := kv.Process(context.Background(), lpm.Put(r))
+	if (err != nil){
+		t.Error("Error inserting route: ", r)
+	}
 
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("1.1.1.1")))
     if (err == nil){
@@ -63,7 +66,7 @@ func TestSimpleLPM(t *testing.T){
             t.Error("Result does not match expected")
         }
     } else {
-        t.Error("Error calculating LPM: ", err)
+        t.Error("Error calculating LPM: ", err, r)
     }
 
     hive.Stop()
@@ -86,7 +89,11 @@ func TestMiss1(t *testing.T){
          2,
     }
 
-    kv.Process(context.Background(), lpm.Put(r))
+	_, err := kv.Process(context.Background(), lpm.Put(r))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r)
+	}
+
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("4.4.4.4")))
     if (err == nil){
         if (err == nil){
@@ -118,13 +125,15 @@ func TestMiss2(t *testing.T){
          2,
     }
 
-    kv.Process(context.Background(), lpm.Put(r))
+	_, err := kv.Process(context.Background(), lpm.Put(r))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r)
+	}
+
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("255.0.0.0")))
     if (err == nil){
-        if (err == nil){
-            if res != nil{
-                t.Error("Found a result when there should not have been one: ", res)
-            }
+        if res != nil{
+            t.Error("Found a result when there should not have been one: ", res)
         }
     } else {
         t.Error("Error calculating LPM: ", err)
@@ -144,7 +153,8 @@ func TestMissEmpty(t *testing.T){
     go hive.Start()
 
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("255.0.0.0")))
-    if (err == nil){
+
+	if (err == nil){
         if res != nil{
             t.Error("Found a result when there should not have been one: ", res)
         }
@@ -193,10 +203,25 @@ func TestHighPriority1(t *testing.T){
         10,
     }
 
-    kv.Process(context.Background(), lpm.Put(r1))
-    kv.Process(context.Background(), lpm.Put(r2))
-    kv.Process(context.Background(), lpm.Put(r3))
-    kv.Process(context.Background(), lpm.Put(r4))
+	_, err := kv.Process(context.Background(), lpm.Put(r1))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r1)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r2))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r2)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r3))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r3)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r4))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r4)
+	}
 
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("123.123.123.123")))
     if (err == nil){
@@ -248,10 +273,26 @@ func TestHighPriority2(t *testing.T){
         1,
     }
 
-    kv.Process(context.Background(), lpm.Put(r1))
-    kv.Process(context.Background(), lpm.Put(r2))
-    kv.Process(context.Background(), lpm.Put(r3))
-    kv.Process(context.Background(), lpm.Put(r4))
+	_, err := kv.Process(context.Background(), lpm.Put(r1))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r1)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r2))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r2)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r3))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r3)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r4))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r4)
+	}
+
 
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("123.123.123.123")))
     if (err == nil){
@@ -303,10 +344,26 @@ func TestHighPriority3(t *testing.T){
         1,
     }
 
-    kv.Process(context.Background(), lpm.Put(r1))
-    kv.Process(context.Background(), lpm.Put(r2))
-    kv.Process(context.Background(), lpm.Put(r3))
-    kv.Process(context.Background(), lpm.Put(r4))
+	_, err := kv.Process(context.Background(), lpm.Put(r1))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r1)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r2))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r2)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r3))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r3)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r4))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r4)
+	}
+
 
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("123.123.123.123")))
     if (err == nil){
@@ -358,10 +415,26 @@ func TestPrefixMatchShort(t *testing.T){
         1,
     }
 
-    kv.Process(context.Background(), lpm.Put(r1))
-    kv.Process(context.Background(), lpm.Put(r2))
-    kv.Process(context.Background(), lpm.Put(r3))
-    kv.Process(context.Background(), lpm.Put(r4))
+	_, err := kv.Process(context.Background(), lpm.Put(r1))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r1)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r2))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r2)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r3))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r3)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r4))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r4)
+	}
+
 
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("255.0.0.0")))
     if (err == nil){
@@ -413,10 +486,26 @@ func TestPrefixMatchLong(t *testing.T){
         1,
     }
 
-    kv.Process(context.Background(), lpm.Put(r1))
-    kv.Process(context.Background(), lpm.Put(r2))
-    kv.Process(context.Background(), lpm.Put(r3))
-    kv.Process(context.Background(), lpm.Put(r4))
+	_, err := kv.Process(context.Background(), lpm.Put(r1))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r1)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r2))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r2)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r3))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r3)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r4))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r4)
+	}
+
 
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("255.255.255.255")))
     if (err == nil){
@@ -453,8 +542,16 @@ func TestExactDelete1(t *testing.T){
         true,
     }
 
-    kv.Process(context.Background(), lpm.Put(r))
-    kv.Process(context.Background(), d)
+	_, err := kv.Process(context.Background(), lpm.Put(r))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r)
+	}
+
+    _, err = kv.Process(context.Background(), d)
+	if (err != nil){
+		t.Error("Error deleting route: ", err, d)
+	}
+
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("255.255.255.255")))
     if (err == nil){
         if res != nil{
@@ -497,10 +594,21 @@ func TestExactDeleteMiss(t *testing.T){
         true,
     }
 
-    kv.Process(context.Background(), lpm.Put(r1))
-    kv.Process(context.Background(), lpm.Put(r2))
+	_, err := kv.Process(context.Background(), lpm.Put(r1))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r1)
+	}
 
-    kv.Process(context.Background(), d)
+	_, err = kv.Process(context.Background(), lpm.Put(r2))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r2)
+	}
+
+	_, err = kv.Process(context.Background(), d)
+	if (err != nil){
+		t.Error("Error deleting route: ", err, d)
+	}
+
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("255.255.255.255")))
     if (err == nil){
         if res == nil || !(compareRoute(r1, res.(lpm.Route))){
@@ -564,12 +672,35 @@ func TestNonExactDelete1(t *testing.T){
         false,
     }
 
-    kv.Process(context.Background(), lpm.Put(r1))
-    kv.Process(context.Background(), lpm.Put(r2))
-    kv.Process(context.Background(), lpm.Put(r3))
-    kv.Process(context.Background(), lpm.Put(r4))
-    kv.Process(context.Background(), lpm.Put(r5))
-    kv.Process(context.Background(), d)
+	_, err := kv.Process(context.Background(), lpm.Put(r1))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r1)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r2))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r2)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r3))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r3)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r4))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r4)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r5))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r5)
+	}
+
+	_, err = kv.Process(context.Background(), d)
+	if (err != nil){
+		t.Error("Error deleting route: ", err, d)
+	}
 
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("255.255.255.255")))
     if (err == nil){
@@ -634,12 +765,35 @@ func TestNonExactDelete2(t *testing.T){
         false,
     }
 
-    kv.Process(context.Background(), lpm.Put(r1))
-    kv.Process(context.Background(), lpm.Put(r2))
-    kv.Process(context.Background(), lpm.Put(r3))
-    kv.Process(context.Background(), lpm.Put(r4))
-    kv.Process(context.Background(), lpm.Put(r5))
-    kv.Process(context.Background(), d)
+	_, err := kv.Process(context.Background(), lpm.Put(r1))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r1)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r2))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r2)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r3))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r3)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r4))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r4)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r5))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r5)
+	}
+
+	_, err = kv.Process(context.Background(), d)
+	if (err != nil){
+		t.Error("Error deleting route: ", err, d)
+	}
 
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("255.255.255.255")))
     if (err == nil){
@@ -725,15 +879,50 @@ func TestNonExactDelete3(t *testing.T){
         false,
     }
 
-    kv.Process(context.Background(), lpm.Put(r1))
-    kv.Process(context.Background(), lpm.Put(r2))
-    kv.Process(context.Background(), lpm.Put(r3))
-    kv.Process(context.Background(), lpm.Put(r4))
-    kv.Process(context.Background(), lpm.Put(r5))
-    kv.Process(context.Background(), lpm.Put(r6))
-    kv.Process(context.Background(), lpm.Put(r7))
-    kv.Process(context.Background(), lpm.Put(r8))
-    kv.Process(context.Background(), d)
+	_, err := kv.Process(context.Background(), lpm.Put(r1))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r1)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r2))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r2)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r3))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r3)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r4))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r4)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r5))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r5)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r6))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r6)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r7))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r7)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r8))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r8)
+	}
+
+	_, err = kv.Process(context.Background(), d)
+	if (err != nil){
+		t.Error("Error deleting route: ", err, d)
+	}
 
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("255.255.255.255")))
     if (err == nil){
@@ -798,12 +987,35 @@ func TestNonExactDeleteMiss(t *testing.T){
         false,
     }
 
-    kv.Process(context.Background(), lpm.Put(r1))
-    kv.Process(context.Background(), lpm.Put(r2))
-    kv.Process(context.Background(), lpm.Put(r3))
-    kv.Process(context.Background(), lpm.Put(r4))
-    kv.Process(context.Background(), lpm.Put(r5))
-    kv.Process(context.Background(), d)
+	_, err := kv.Process(context.Background(), lpm.Put(r1))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r1)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r2))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r2)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r3))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r3)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r4))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r4)
+	}
+
+	_, err = kv.Process(context.Background(), lpm.Put(r5))
+	if (err != nil){
+		t.Error("Error inserting route: ", err, r5)
+	}
+
+	_, err = kv.Process(context.Background(), d)
+	if (err != nil){
+		t.Error("Error deleting route: ", err, d)
+	}
 
     res, err := kv.Process(context.Background(), lpm.CalcLPM(net.ParseIP("255.255.255.255")))
     if (err == nil){
