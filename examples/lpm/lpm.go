@@ -37,8 +37,10 @@ type get string
 
 type Del struct {
 	Dest  net.IP `json:"dest"`
-	Len   int    `json:len`
-	Exact bool   `json:exact`
+	//Len   int    `json:len`
+    Len   int    `json:"len"`
+	//Exact bool   `json:exact`
+    Exact bool   `json:"exact"`
 }
 
 type delKey string
@@ -215,7 +217,8 @@ func (s *Lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 					best_pri = rt.Priority
 					best_len = rt.Len
 				}
-				lpmlog.Printf("Candidate: %s\n", rt)
+				//lpmlog.Printf("Candidate: %s\n", rt)
+                lpmlog.Printf("Candidate: %s\n", rt.Name)
 			}
 		}
 
