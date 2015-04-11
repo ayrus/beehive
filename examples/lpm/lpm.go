@@ -45,7 +45,7 @@ type delKey string
 
 type Lpm struct {
 	*bh.Sync
-	buckets uint64
+	Buckets uint64
 }
 
 type warmup struct {
@@ -235,20 +235,20 @@ func (s *Lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 	switch data := msg.Data().(type) {
 	case Put:
 		k = getKey(Route(data))
-		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
+		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.Buckets, 16)
 	case get:
 		k = string(data)
-		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
+		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.Buckets, 16)
 	case Del:
 		k = getDelKey(Del(data))
-		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
+		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.Buckets, 16)
 	case delKey:
 		k = string(data)
-		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.buckets, 16)
+		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.Buckets, 16)
 	case warmup:
 		k = strconv.FormatUint(uint64(data.bnum), 16)
 	case CalcLPM:
-		k = strconv.FormatInt(int64(rand.Intn(int(s.buckets)))+int64(s.buckets), 16)
+		k = strconv.FormatInt(int64(rand.Intn(int(s.Buckets)))+int64(s.Buckets), 16)
 	}
 
 	cells := bh.MappedCells{
@@ -339,29 +339,34 @@ func (s *Lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type LPMOptions struct {
-	replFactor int  //= flag.Int("lpm.rf", 3, "replication factor")
-	buckets    int  //= flag.Int("lpm.b", 50, "number of buckets")
-	raftlog    bool //= flag.Bool("lpm.raftlog", false, "whether to print raft log")
-	lg         bool //            = flag.Bool("lpm.log", false, "whether to print lpm log")
-	random     bool //= flag.Bool("lpm.rand", false, "whether to use random placement")
-	warmup     bool //= flag.Bool("lpm.warmup", false, "whether to warm up beehive before processing requests")
+	ReplFactor int  //= flag.Int("lpm.rf", 3, "replication factor")
+	Buckets    int  //= flag.Int("lpm.b", 50, "number of Buckets")
+	Raftlog    bool //= flag.Bool("lpm.Raftlog", false, "whether to print raft log")
+	Lg         bool //= flag.Bool("lpm.log", false, "whether to print lpm log")
+	Random     bool //= flag.Bool("lpm.rand", false, "whether to use Random placement")
+	Warmup     bool //= flag.Bool("lpm.warmup", false, "whether to warm up beehive before processing requests")
 }
 
 func NewLPMOptions() *LPMOptions {
-	return &LPMOptions{replFactor: 3, buckets: 5, raftlog: false, lg: false, random: false, warmup: true}
+	return &LPMOptions{ReplFactor: 3, Buckets: 5, Raftlog: false, Lg: true, Random: false, Warmup: true}
 }
 
 func Install(hive bh.Hive, options LPMOptions) *Lpm {
 	rand.Seed(time.Now().UnixNano())
 
-	if !options.raftlog {
+	if !options.Raftlog {
 		log.SetOutput(ioutil.Discard)
 	}
 
-	lpmlog = log.New(os.Stderr, "LPM: ", 0)
 
-	opts := []bh.AppOption{bh.Persistent(options.replFactor)}
-	if options.random {
+	if !options.Lg{
+		lpmlog = log.New(ioutil.Discard, "LPM: ", 0)
+	} else {
+		lpmlog = log.New(os.Stderr, "LPM: ", 0)
+	}
+
+	opts := []bh.AppOption{bh.Persistent(options.ReplFactor)}
+	if options.Random {
 		rp := bh.RandomPlacement{
 			Rand: rand.New(rand.NewSource(time.Now().UnixNano())),
 		}
@@ -372,7 +377,7 @@ func Install(hive bh.Hive, options LPMOptions) *Lpm {
 
 	kv := &Lpm{
 		Sync:    s,
-		buckets: uint64(options.buckets),
+		Buckets: uint64(options.Buckets),
 	}
 
 	s.Handle(warmup{}, kv)
@@ -393,8 +398,8 @@ func Install(hive bh.Hive, options LPMOptions) *Lpm {
 	go func() {
 		ctx, cnl := context.WithCancel(context.Background())
 
-		if options.warmup && options.buckets > 0 {
-			for i := 0; i < options.buckets*2; i++ {
+		if options.Warmup && options.Buckets > 0 {
+			for i := 0; i < options.Buckets*2; i++ {
 				s.Process(ctx, warmup{i})
 			}
 
