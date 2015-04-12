@@ -36,11 +36,11 @@ type Put Route
 type get string
 
 type Del struct {
-	Dest  net.IP `json:"dest"`
+	Dest net.IP `json:"dest"`
 	//Len   int    `json:len`
-    Len   int    `json:"len"`
+	Len int `json:"len"`
 	//Exact bool   `json:exact`
-    Exact bool   `json:"exact"`
+	Exact bool `json:"exact"`
 }
 
 type delKey string
@@ -184,8 +184,6 @@ func (s *Lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 		lpmlog.Println("Received CalcLPM request")
 
 		netctx, cnl := context.WithCancel(context.Background())
-		var res interface{}
-		var err error
 
 		ip := net.IP(data)
 		ln := iplen(ip) * 8
@@ -195,7 +193,7 @@ func (s *Lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 			mask := net.CIDRMask(i, ln)
 			req := ip.Mask(mask).String() + "/" + strconv.FormatInt(int64(i), 10)
 			go func(req string) {
-				res, err = s.Process(netctx, get(req))
+				res, err := s.Process(netctx, get(req))
 
 				if err == nil {
 					chnl <- res
@@ -204,6 +202,8 @@ func (s *Lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 				}
 			}(req)
 		}
+
+		var res interface{}
 
 		best_pri := -1
 		best_len := -1
@@ -218,7 +218,7 @@ func (s *Lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 					best_len = rt.Len
 				}
 				//lpmlog.Printf("Candidate: %s\n", rt)
-                lpmlog.Printf("Candidate: %s\n", rt.Name)
+				lpmlog.Printf("Candidate: %s\n", rt.Name)
 			}
 		}
 
@@ -361,8 +361,7 @@ func Install(hive bh.Hive, options LPMOptions) *Lpm {
 		log.SetOutput(ioutil.Discard)
 	}
 
-
-	if !options.Lg{
+	if !options.Lg {
 		lpmlog = log.New(ioutil.Discard, "LPM: ", 0)
 	} else {
 		lpmlog = log.New(os.Stderr, "LPM: ", 0)
