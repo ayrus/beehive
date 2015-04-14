@@ -9,12 +9,12 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/OneOfOne/xxhash"
 	bh "github.com/kandoo/beehive"
+	"github.com/kandoo/beehive/Godeps/_workspace/src/github.com/golang/glog"
 	"github.com/kandoo/beehive/Godeps/_workspace/src/github.com/gorilla/mux"
 	"github.com/kandoo/beehive/Godeps/_workspace/src/golang.org/x/net/context"
 )
@@ -29,32 +29,23 @@ var (
 	errInvalid     = errors.New("lpm: invalid parameter")
 )
 
-var lpmlog *log.Logger
-
 type Put Route
 
-type get string
+type Get net.IP
 
 type Del struct {
-	Dest net.IP `json:"dest"`
-	//Len   int    `json:len`
-	Len int `json:"len"`
-	//Exact bool   `json:exact`
-	Exact bool `json:"exact"`
+	Dest  net.IP `json:"dest"`
+	Len   int    `json:"len"`
+	Exact bool   `json:"exact"`
 }
+
+type getKey string
 
 type delKey string
-
-type Lpm struct {
-	*bh.Sync
-	Buckets uint64
-}
 
 type warmup struct {
 	bnum int
 }
-
-type CalcLPM net.IP
 
 type Route struct {
 	Dest     net.IP `json:"dest"`
@@ -63,30 +54,13 @@ type Route struct {
 	Priority int    `json:"priority"`
 }
 
-func unmarshal(data []byte) (Route, error) {
-	var rt Route
-	var terr error
-
-	terr = json.Unmarshal(data, &rt)
-	if terr != nil {
-		lpmlog.Println("Unmarshal error: ", terr)
-		return rt, errors.New(errInvalid.Error())
-	}
-
-	return rt, nil
+type baseHandler struct {
+	*bh.Sync
+	Buckets uint64
 }
 
-func unmarshalDel(data []byte) (Del, error) {
-	var dl Del
-	var terr error
-
-	terr = json.Unmarshal(data, &dl)
-	if terr != nil {
-		lpmlog.Println("Unmarshal error: ", terr)
-		return dl, errors.New(errInvalid.Error())
-	}
-
-	return dl, nil
+func (s *baseHandler) hash(str string) string {
+	return strconv.FormatUint(xxhash.Checksum64([]byte(str))%s.Buckets, 16)
 }
 
 func iplen(ip net.IP) int {
@@ -97,7 +71,7 @@ func iplen(ip net.IP) int {
 	}
 }
 
-func getKey(rt Route) string {
+func getRouteKey(rt Route) string {
 	msk := net.CIDRMask(rt.Len, iplen(rt.Dest)*8)
 	k := rt.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(rt.Len), 10)
 	return k
@@ -109,148 +83,204 @@ func getDelKey(dl Del) string {
 	return k
 }
 
-func (s *Lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
-	switch data := msg.Data().(type) {
-
-	case Put:
-		rt1 := Route(data)
-		var rt2 Route
-		err := ctx.Dict(dict).GetGob(getKey(rt1), &rt2)
-		if err == nil {
-			if rt1.Priority > rt2.Priority {
-				lpmlog.Printf("Inserted %s\n", getKey(rt1))
-				return ctx.Dict(dict).PutGob(getKey(rt1), &rt1)
-			} else {
-				return nil
-			}
-		} else {
-			lpmlog.Printf("Inserted %s\n", getKey(rt1))
-			return ctx.Dict(dict).PutGob(getKey(rt1), &rt1)
-		}
-
-	case get:
-		var rt Route
-		err := ctx.Dict(dict).GetGob(string(data), &rt)
-		lpmlog.Printf("Looking up - %s\n", data)
-		if err == nil {
-			ctx.ReplyTo(msg, rt)
-		} else {
-			ctx.ReplyTo(msg, nil)
-		}
-
-		return nil
-
-	case Del:
-		dl := Del(data)
-
-		lpmlog.Println("Received Delete Request")
-
-		if !dl.Exact {
-			for i := dl.Len; i <= iplen(dl.Dest)*8; i++ {
-				msk := net.CIDRMask(i, iplen(dl.Dest)*8)
-				ck := dl.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(i), 10)
-				ctx.Emit(delKey(ck))
-			}
-		} else {
-			ctx.Emit(delKey(getDelKey(dl)))
-		}
-		return nil
-
-	case delKey:
-		dk := string(data)
-		lpmlog.Println("Deleting!", dk)
-
-		return ctx.Dict(dict).Del(dk)
-
-	case warmup:
-		lpmlog.Printf("Created bee #%d", data.bnum)
-		return nil
-
-	case CalcLPM:
-		lpmlog.Println("Received CalcLPM request")
-
-		netctx, cnl := context.WithCancel(context.Background())
-
-		ip := net.IP(data)
-		ln := iplen(ip) * 8
-		chnl := make(chan interface{})
-
-		for i := ln; i >= 0; i-- {
-			mask := net.CIDRMask(i, ln)
-			req := ip.Mask(mask).String() + "/" + strconv.FormatInt(int64(i), 10)
-			go func(req string) {
-				res, err := s.Process(netctx, get(req))
-
-				if err == nil {
-					chnl <- res
-				} else {
-					chnl <- nil
-				}
-			}(req)
-		}
-
-		var res interface{}
-
-		best_pri := -1
-		best_len := -1
-
-		for i := 0; i < ln; i++ {
-			x := <-chnl
-			if x != nil {
-				rt := x.(Route)
-				if rt.Priority > best_pri || (rt.Priority == best_pri && rt.Len > best_len) {
-					res = rt
-					best_pri = rt.Priority
-					best_len = rt.Len
-				}
-				//lpmlog.Printf("Candidate: %s\n", rt)
-				lpmlog.Printf("Candidate: %s\n", rt.Name)
-			}
-		}
-
-		ctx.ReplyTo(msg, res)
-
-		cnl()
-
-		return nil
-
-	}
-	return errInvalid
+type putHandler struct {
+	*baseHandler
 }
 
-func (s *Lpm) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
-	var k string
-
-	switch data := msg.Data().(type) {
-	case Put:
-		k = getKey(Route(data))
-		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.Buckets, 16)
-	case get:
-		k = string(data)
-		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.Buckets, 16)
-	case Del:
-		k = getDelKey(Del(data))
-		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.Buckets, 16)
-	case delKey:
-		k = string(data)
-		k = strconv.FormatUint(xxhash.Checksum64([]byte(k))%s.Buckets, 16)
-	case warmup:
-		k = strconv.FormatUint(uint64(data.bnum), 16)
-	case CalcLPM:
-		k = strconv.FormatInt(int64(rand.Intn(int(s.Buckets)))+int64(s.Buckets), 16)
+func (s *putHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
+	data := msg.Data().(Put)
+	rt1 := Route(data)
+	var rt2 Route
+	err := ctx.Dict(dict).GetGob(getRouteKey(rt1), &rt2)
+	if err == nil {
+		if rt1.Priority > rt2.Priority {
+			glog.V(2).Infof("Inserted %s\n", getRouteKey(rt1))
+			return ctx.Dict(dict).PutGob(getRouteKey(rt1), &rt1)
+		} else {
+			return nil
+		}
+	} else {
+		glog.V(2).Infof("Inserted %s\n", getRouteKey(rt1))
+		return ctx.Dict(dict).PutGob(getRouteKey(rt1), &rt1)
 	}
+}
 
-	cells := bh.MappedCells{
+func (s *putHandler) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
+	return bh.MappedCells{
 		{
 			Dict: dict,
-			Key:  k,
+			Key:  s.hash(getRouteKey(Route(msg.Data().(Put)))),
 		},
 	}
-	return cells
 }
 
-func (s *Lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	lpmlog.Println("Received HTTP request")
+type getHandler struct {
+	*baseHandler
+}
+
+func (s *getHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
+	data := msg.Data().(Get)
+
+	glog.V(2).Infoln("Received Get request")
+
+	netctx, cnl := context.WithCancel(context.Background())
+	defer cnl()
+
+	var res interface{}
+	var err error
+
+	ip := net.IP(data)
+	ln := iplen(ip) * 8
+	chnl := make(chan interface{})
+
+	for i := ln; i >= 0; i-- {
+		mask := net.CIDRMask(i, ln)
+		req := ip.Mask(mask).String() + "/" + strconv.FormatInt(int64(i), 10)
+		go func(req string) {
+			res, err = s.Process(netctx, getKey(req))
+
+			if err == nil {
+				chnl <- res
+			} else {
+				chnl <- nil
+			}
+		}(req)
+	}
+
+	best_pri := -1
+	best_len := -1
+
+	for i := 0; i < ln; i++ {
+		x := <-chnl
+		if x != nil {
+			rt := x.(Route)
+			if rt.Priority > best_pri || (rt.Priority == best_pri && rt.Len > best_len) {
+				res = rt
+				best_pri = rt.Priority
+				best_len = rt.Len
+			}
+			glog.V(2).Infof("Candidate: %s\n", rt.Name)
+		}
+	}
+
+	ctx.ReplyTo(msg, res)
+
+	return nil
+
+}
+
+func (s *getHandler) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
+	return bh.MappedCells{
+		{
+			Dict: dict,
+			Key:  strconv.FormatInt(int64(rand.Intn(int(s.Buckets)))+int64(s.Buckets), 16),
+		},
+	}
+}
+
+type delHandler struct {
+	*baseHandler
+}
+
+func (s *delHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
+	data := msg.Data().(Del)
+
+	dl := Del(data)
+
+	glog.V(2).Infof("Received Delete Request")
+
+	if !dl.Exact {
+		for i := dl.Len; i <= iplen(dl.Dest)*8; i++ {
+			msk := net.CIDRMask(i, iplen(dl.Dest)*8)
+			ck := dl.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(i), 10)
+			ctx.Emit(delKey(ck))
+		}
+	} else {
+		ctx.Emit(delKey(getDelKey(dl)))
+	}
+	return nil
+
+}
+
+type getKeyHandler struct {
+	*baseHandler
+}
+
+func (s *getKeyHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
+	data := msg.Data().(getKey)
+	var rt Route
+	err := ctx.Dict(dict).GetGob(string(data), &rt)
+	glog.V(2).Infof("Looking up - %s\n", data)
+	if err == nil {
+		ctx.ReplyTo(msg, rt)
+	} else {
+		ctx.ReplyTo(msg, nil)
+	}
+
+	return nil
+}
+
+func (s *getKeyHandler) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
+	return bh.MappedCells{
+		{
+			Dict: dict,
+			Key:  s.hash(string(msg.Data().(getKey))),
+		},
+	}
+}
+
+func (s *delHandler) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
+	return bh.MappedCells{
+		{
+			Dict: dict,
+			Key:  s.hash(getDelKey(Del(msg.Data().(Del)))),
+		},
+	}
+}
+
+type delKeyHandler struct {
+	*baseHandler
+}
+
+func (s *delKeyHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
+	data := msg.Data().(delKey)
+
+	dk := string(data)
+	glog.V(2).Infoln("Deleting!", dk)
+
+	return ctx.Dict(dict).Del(dk)
+}
+
+func (s *delKeyHandler) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
+	return bh.MappedCells{
+		{
+			Dict: dict,
+			Key:  s.hash(string(msg.Data().(delKey))),
+		},
+	}
+}
+
+type warmupHandler struct {
+	*baseHandler
+}
+
+func (s *warmupHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
+	data := msg.Data().(warmup)
+	glog.V(2).Infof("Created bee #%d", data.bnum)
+	return nil
+}
+
+func (s *warmupHandler) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
+	return bh.MappedCells{
+		{
+			Dict: dict,
+			Key:  strconv.FormatUint(uint64(msg.Data().(warmup).bnum), 16),
+		},
+	}
+}
+
+func (s *baseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	glog.V(2).Infoln("Received HTTP request")
 
 	k, ok := mux.Vars(r)["key"]
 	if !ok {
@@ -259,14 +289,15 @@ func (s *Lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx, cnl := context.WithCancel(context.Background())
+	defer cnl()
 
 	var res interface{}
 	var err error
 
 	switch r.Method {
 	case "GET":
-		res, err = s.Process(ctx, CalcLPM(net.ParseIP(k)))
-		lpmlog.Println(res)
+		res, err = s.Process(ctx, Get(net.ParseIP(k)))
+		glog.V(2).Infoln(res)
 	case "PUT":
 		var v []byte
 		var rt Route
@@ -275,8 +306,8 @@ func (s *Lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		lpmlog.Println("HTTP Received Put")
-		rt, err = unmarshal(v)
+		glog.V(2).Infoln("HTTP Received Put")
+		err = json.Unmarshal(v, &rt)
 		if err != nil {
 			break
 		}
@@ -290,15 +321,13 @@ func (s *Lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		dl, err = unmarshalDel(v)
+		err = json.Unmarshal(v, &dl)
 		if err != nil {
 			break
 		}
 
 		res, err = s.Process(ctx, Del(dl))
 	}
-
-	cnl()
 
 	if err != nil {
 		switch {
@@ -328,29 +357,23 @@ func (s *Lpm) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type LPMOptions struct {
-	ReplFactor int  //= flag.Int("lpm.rf", 3, "replication factor")
-	Buckets    int  //= flag.Int("lpm.b", 50, "number of Buckets")
-	Raftlog    bool //= flag.Bool("lpm.Raftlog", false, "whether to print raft log")
-	Lg         bool //= flag.Bool("lpm.log", false, "whether to print lpm log")
-	Random     bool //= flag.Bool("lpm.rand", false, "whether to use Random placement")
-	Warmup     bool //= flag.Bool("lpm.warmup", false, "whether to warm up beehive before processing requests")
+	ReplFactor int  // Replication factor
+	Buckets    int  // Number of buckets
+	Raftlog    bool // Whether to print raft log
+	Lg         bool // Whether to print lpm log TODO
+	Random     bool // Whether to use random placement
+	Warmup     bool // Whether to warm up beehive before processing requests
 }
 
 func NewLPMOptions() *LPMOptions {
 	return &LPMOptions{ReplFactor: 3, Buckets: 5, Raftlog: false, Lg: true, Random: false, Warmup: true}
 }
 
-func Install(hive bh.Hive, options LPMOptions) *Lpm {
+func Install(hive bh.Hive, options LPMOptions) *bh.Sync {
 	rand.Seed(time.Now().UnixNano())
 
 	if !options.Raftlog {
 		log.SetOutput(ioutil.Discard)
-	}
-
-	if !options.Lg {
-		lpmlog = log.New(ioutil.Discard, "LPM: ", 0)
-	} else {
-		lpmlog = log.New(os.Stderr, "LPM: ", 0)
 	}
 
 	opts := []bh.AppOption{bh.Persistent(options.ReplFactor)}
@@ -363,28 +386,32 @@ func Install(hive bh.Hive, options LPMOptions) *Lpm {
 	a := hive.NewApp("lpm", opts...)
 	s := bh.NewSync(a)
 
-	kv := &Lpm{
+	buckets := uint64(options.Buckets)
+
+	handler := &baseHandler{
 		Sync:    s,
-		Buckets: uint64(options.Buckets),
+		Buckets: buckets,
 	}
 
-	s.Handle(warmup{}, kv)
-	s.Handle(CalcLPM{}, kv)
-	s.Handle(Put{}, kv)
-	s.Handle(get(""), kv)
-	s.Handle(Del{}, kv)
-	s.Handle(delKey(""), kv)
+	s.Handle(warmup{}, &warmupHandler{handler})
+	s.Handle(Get{}, &getHandler{handler})
+	s.Handle(Put{}, &putHandler{handler})
+	s.Handle(getKey(""), &getKeyHandler{handler})
+	s.Handle(Del{}, &delHandler{handler})
+	s.Handle(delKey(""), &delKeyHandler{handler})
 
-	a.Handle(CalcLPM{}, kv)
-	a.Handle(Put{}, kv)
-	a.Handle(get(""), kv)
-	a.Handle(Del{}, kv)
-	a.Handle(delKey(""), kv)
-	a.HandleHTTP("", kv)
-	a.HandleHTTP("/{key}", kv)
+	a.Handle(warmup{}, &warmupHandler{handler})
+	a.Handle(Get{}, &getHandler{handler})
+	a.Handle(Put{}, &putHandler{handler})
+	a.Handle(getKey(""), &getKeyHandler{handler})
+	a.Handle(Del{}, &delHandler{handler})
+	a.Handle(delKey(""), &delKeyHandler{handler})
+
+	a.HandleHTTP("/{key}", handler)
 
 	go func() {
 		ctx, cnl := context.WithCancel(context.Background())
+		defer cnl()
 
 		if options.Warmup && options.Buckets > 0 {
 			for i := 0; i < options.Buckets*2; i++ {
@@ -392,11 +419,9 @@ func Install(hive bh.Hive, options LPMOptions) *Lpm {
 			}
 
 		}
-
-		cnl()
 	}()
 
-	return kv
+	return s
 }
 
 func init() {

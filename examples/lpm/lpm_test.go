@@ -30,7 +30,7 @@ const (
 var insertURL *string
 var hive bh.Hive
 var testLog *log.Logger
-var kv *Lpm
+var kv *bh.Sync
 
 func init() {
 	u, _ := url.ParseRequestURI(endpoint)
@@ -404,7 +404,7 @@ func TestSimpleLPM(t *testing.T) {
 		t.Error("Error inserting route: ", r)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("1.1.1.1")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("1.1.1.1")))
 	if err == nil {
 		if res == nil || !(compareRoute(r, res.(Route))) {
 			t.Error("Result does not match expected")
@@ -436,7 +436,7 @@ func TestMiss1(t *testing.T) {
 		t.Error("Error inserting route: ", err, r)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("4.4.4.4")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("4.4.4.4")))
 	if err == nil {
 		if err == nil {
 			if res != nil {
@@ -469,7 +469,7 @@ func TestMiss2(t *testing.T) {
 		t.Error("Error inserting route: ", err, r)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("255.0.0.0")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("255.0.0.0")))
 	if err == nil {
 		if res != nil {
 			t.Error("Found a result when there should not have been one: ", res)
@@ -488,7 +488,7 @@ func TestMissEmpty(t *testing.T) {
 	setupTest()
 	testLog.Println("TestMissEmpty")
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("255.0.0.0")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("255.0.0.0")))
 
 	if err == nil {
 		if res != nil {
@@ -556,7 +556,7 @@ func TestHighPriority1(t *testing.T) {
 		t.Error("Error inserting route: ", err, r4)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("123.123.123.123")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("123.123.123.123")))
 	if err == nil {
 		if res == nil || !(compareRoute(r4, res.(Route))) {
 			t.Error("Returned the wrong result: ", res)
@@ -623,7 +623,7 @@ func TestHighPriority2(t *testing.T) {
 		t.Error("Error inserting route: ", err, r4)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("123.123.123.123")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("123.123.123.123")))
 	if err == nil {
 		if res == nil || !(compareRoute(r1, res.(Route))) {
 			t.Error("Returned the wrong result: ", res)
@@ -690,7 +690,7 @@ func TestHighPriority3(t *testing.T) {
 		t.Error("Error inserting route: ", err, r4)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("123.123.123.123")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("123.123.123.123")))
 	if err == nil {
 		if res == nil || !(compareRoute(r1, res.(Route))) {
 			t.Error("Returned the wrong result: ", res)
@@ -757,7 +757,7 @@ func TestPrefixMatchShort(t *testing.T) {
 		t.Error("Error inserting route: ", err, r4)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("255.0.0.0")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("255.0.0.0")))
 	if err == nil {
 		if res == nil || !(compareRoute(r4, res.(Route))) {
 			t.Error("Returned the wrong result: ", res)
@@ -824,7 +824,7 @@ func TestPrefixMatchLong(t *testing.T) {
 		t.Error("Error inserting route: ", err, r4)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("255.255.255.255")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("255.255.255.255")))
 	if err == nil {
 		if res == nil || !(compareRoute(r1, res.(Route))) {
 			t.Error("Returned the wrong result: ", res)
@@ -866,7 +866,7 @@ func TestExactDelete1(t *testing.T) {
 		t.Error("Error deleting route: ", err, d)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("255.255.255.255")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("255.255.255.255")))
 	if err == nil {
 		if res != nil {
 			t.Error("Found a result when there should not have been one: ", res)
@@ -921,7 +921,7 @@ func TestExactDeleteMiss(t *testing.T) {
 		t.Error("Error deleting route: ", err, d)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("255.255.255.255")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("255.255.255.255")))
 	if err == nil {
 		if res == nil || !(compareRoute(r1, res.(Route))) {
 			t.Error("Returned the wrong result: ", res)
@@ -1011,7 +1011,7 @@ func TestNonExactDelete1(t *testing.T) {
 		t.Error("Error deleting route: ", err, d)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("255.255.255.255")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("255.255.255.255")))
 	if err == nil {
 		if res != nil {
 			t.Error("Found a result when there should not have been one: ", res)
@@ -1101,7 +1101,7 @@ func TestNonExactDelete2(t *testing.T) {
 		t.Error("Error deleting route: ", err, d)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("255.255.255.255")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("255.255.255.255")))
 	if err == nil {
 		if res != nil {
 			t.Error("Found a result when there should not have been one: ", res)
@@ -1227,7 +1227,7 @@ func TestNonExactDelete3(t *testing.T) {
 		t.Error("Error deleting route: ", err, d)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("255.255.255.255")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("255.255.255.255")))
 	if err == nil {
 		if res == nil || !(compareRoute(r6, res.(Route))) {
 			t.Error("Returned the wrong result: ", res)
@@ -1317,7 +1317,7 @@ func TestNonExactDeleteMiss(t *testing.T) {
 		t.Error("Error deleting route: ", err, d)
 	}
 
-	res, err := kv.Process(context.Background(), CalcLPM(net.ParseIP("255.255.255.255")))
+	res, err := kv.Process(context.Background(), Get(net.ParseIP("255.255.255.255")))
 	if err == nil {
 		if res == nil || !(compareRoute(r1, res.(Route))) {
 			t.Error("Returned the wrong result: ", res)
