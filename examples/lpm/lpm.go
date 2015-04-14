@@ -126,9 +126,6 @@ func (s *getHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	netctx, cnl := context.WithCancel(context.Background())
 	defer cnl()
 
-	var res interface{}
-	var err error
-
 	ip := net.IP(data)
 	ln := iplen(ip) * 8
 	chnl := make(chan interface{})
@@ -136,8 +133,9 @@ func (s *getHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	for i := ln; i >= 0; i-- {
 		mask := net.CIDRMask(i, ln)
 		req := ip.Mask(mask).String() + "/" + strconv.FormatInt(int64(i), 10)
+		//TODO: Remove goroutines later
 		go func(req string) {
-			res, err = s.Process(netctx, getKey(req))
+			res, err := s.Process(netctx, getKey(req))
 
 			if err == nil {
 				chnl <- res
@@ -146,6 +144,8 @@ func (s *getHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 			}
 		}(req)
 	}
+
+	var res interface{}
 
 	best_pri := -1
 	best_len := -1
