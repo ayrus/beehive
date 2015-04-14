@@ -145,29 +145,15 @@ func (s *Lpm) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 
 		lpmlog.Println("Received Delete Request")
 
-		var err error
-		netctx, cnl := context.WithCancel(context.Background())
-
 		if !dl.Exact {
 			for i := dl.Len; i <= iplen(dl.Dest)*8; i++ {
 				msk := net.CIDRMask(i, iplen(dl.Dest)*8)
 				ck := dl.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(i), 10)
-				go func(req string) {
-					_, err = s.Process(netctx, delKey(req))
-					if err != nil {
-						lpmlog.Println(err)
-					}
-				}(ck)
+				ctx.Emit(delKey(ck))
 			}
 		} else {
-			go func(req string) {
-				_, err = s.Process(netctx, delKey(req))
-				if err != nil {
-					lpmlog.Println(err)
-				}
-			}(getDelKey(dl))
+			ctx.Emit(delKey(getDelKey(dl)))
 		}
-		cnl()
 		return nil
 
 	case delKey:
