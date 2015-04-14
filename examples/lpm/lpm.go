@@ -23,6 +23,8 @@ const (
 	dict = "store"
 )
 
+const L = 0 // Verbosity level
+
 var (
 	errKeyNotFound = errors.New("lpm: key not found")
 	errInternal    = errors.New("lpm: internal error")
@@ -94,13 +96,13 @@ func (s *putHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	err := ctx.Dict(dict).GetGob(getRouteKey(rt1), &rt2)
 	if err == nil {
 		if rt1.Priority > rt2.Priority {
-			glog.V(2).Infof("Inserted %s\n", getRouteKey(rt1))
+			glog.V(L).Infof("Inserted %s\n", getRouteKey(rt1))
 			return ctx.Dict(dict).PutGob(getRouteKey(rt1), &rt1)
 		} else {
 			return nil
 		}
 	} else {
-		glog.V(2).Infof("Inserted %s\n", getRouteKey(rt1))
+		glog.V(L).Infof("Inserted %s\n", getRouteKey(rt1))
 		return ctx.Dict(dict).PutGob(getRouteKey(rt1), &rt1)
 	}
 }
@@ -121,7 +123,7 @@ type getHandler struct {
 func (s *getHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	data := msg.Data().(Get)
 
-	glog.V(2).Infoln("Received Get request")
+	glog.V(L).Infoln("Received Get request")
 
 	netctx, cnl := context.WithCancel(context.Background())
 	defer cnl()
@@ -159,7 +161,7 @@ func (s *getHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 				best_pri = rt.Priority
 				best_len = rt.Len
 			}
-			glog.V(2).Infof("Candidate: %s\n", rt.Name)
+			glog.V(L).Infof("Candidate: %s\n", rt.Name)
 		}
 	}
 
@@ -187,7 +189,7 @@ func (s *delHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 
 	dl := Del(data)
 
-	glog.V(2).Infof("Received Delete Request")
+	glog.V(L).Infof("Received Delete Request")
 
 	if !dl.Exact {
 		for i := dl.Len; i <= iplen(dl.Dest)*8; i++ {
@@ -210,7 +212,7 @@ func (s *getKeyHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	data := msg.Data().(getKey)
 	var rt Route
 	err := ctx.Dict(dict).GetGob(string(data), &rt)
-	glog.V(2).Infof("Looking up - %s\n", data)
+	glog.V(L+1).Infof("Looking up - %s\n", data)
 	if err == nil {
 		ctx.ReplyTo(msg, rt)
 	} else {
@@ -246,7 +248,7 @@ func (s *delKeyHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	data := msg.Data().(delKey)
 
 	dk := string(data)
-	glog.V(2).Infoln("Deleting!", dk)
+	glog.V(L).Infoln("Deleting!", dk)
 
 	return ctx.Dict(dict).Del(dk)
 }
@@ -266,7 +268,7 @@ type warmupHandler struct {
 
 func (s *warmupHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
 	data := msg.Data().(warmup)
-	glog.V(2).Infof("Created bee #%d", data.bnum)
+	glog.V(L).Infof("Created bee #%d", data.bnum)
 	return nil
 }
 
@@ -280,7 +282,7 @@ func (s *warmupHandler) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 }
 
 func (s *baseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	glog.V(2).Infoln("Received HTTP request")
+	glog.V(L).Infoln("Received HTTP request")
 
 	k, ok := mux.Vars(r)["key"]
 	if !ok {
@@ -297,7 +299,7 @@ func (s *baseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 		res, err = s.Process(ctx, Get(net.ParseIP(k)))
-		glog.V(2).Infoln(res)
+		glog.V(L).Infoln(res)
 	case "PUT":
 		var v []byte
 		var rt Route
@@ -306,7 +308,7 @@ func (s *baseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		glog.V(2).Infoln("HTTP Received Put")
+		glog.V(L).Infoln("HTTP Received Put")
 		err = json.Unmarshal(v, &rt)
 		if err != nil {
 			break
@@ -330,6 +332,7 @@ func (s *baseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
+		glog.V(L).Infof("HTTP err: %s\n", err.Error())
 		switch {
 		case err.Error() == errKeyNotFound.Error():
 			http.Error(w, err.Error(), http.StatusNotFound)
@@ -339,6 +342,9 @@ func (s *baseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		case err.Error() == errInvalid.Error():
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		default:
+			http.Error(w, err.Error(), 400)
 			return
 		}
 	}

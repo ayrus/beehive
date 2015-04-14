@@ -47,13 +47,13 @@ func setupTest(shouldSleep bool) {
 		Raftlog:    false,
 		Lg:         false,
 		Random:     false,
-		Warmup:     true,
+		Warmup:     false,
 	}
 	lpmApp = Install(hive, *options)
 
 	go hive.Start()
 	if shouldSleep {
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 
@@ -1330,5 +1330,7 @@ func TestNonExactDeleteMiss(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
+	// Uncomment if you want to see log messages
+	// flag.Set("logtostderr", "true")
 	os.Exit(m.Run())
 }
