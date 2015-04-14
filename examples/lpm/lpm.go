@@ -180,30 +180,6 @@ func (s *getHandler) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 	}
 }
 
-type delHandler struct {
-	*baseHandler
-}
-
-func (s *delHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
-	data := msg.Data().(Del)
-
-	dl := Del(data)
-
-	glog.V(L).Infof("Received Delete Request")
-
-	if !dl.Exact {
-		for i := dl.Len; i <= iplen(dl.Dest)*8; i++ {
-			msk := net.CIDRMask(i, iplen(dl.Dest)*8)
-			ck := dl.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(i), 10)
-			ctx.Emit(delKey(ck))
-		}
-	} else {
-		ctx.Emit(delKey(getDelKey(dl)))
-	}
-	return nil
-
-}
-
 type getKeyHandler struct {
 	*baseHandler
 }
@@ -229,6 +205,30 @@ func (s *getKeyHandler) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
 			Key:  s.hash(string(msg.Data().(getKey))),
 		},
 	}
+}
+
+type delHandler struct {
+	*baseHandler
+}
+
+func (s *delHandler) Rcv(msg bh.Msg, ctx bh.RcvContext) error {
+	data := msg.Data().(Del)
+
+	dl := Del(data)
+
+	glog.V(L).Infof("Received Delete Request")
+
+	if !dl.Exact {
+		for i := dl.Len; i <= iplen(dl.Dest)*8; i++ {
+			msk := net.CIDRMask(i, iplen(dl.Dest)*8)
+			ck := dl.Dest.Mask(msk).String() + "/" + strconv.FormatInt(int64(i), 10)
+			ctx.Emit(delKey(ck))
+		}
+	} else {
+		ctx.Emit(delKey(getDelKey(dl)))
+	}
+	return nil
+
 }
 
 func (s *delHandler) Map(msg bh.Msg, ctx bh.MapContext) bh.MappedCells {
